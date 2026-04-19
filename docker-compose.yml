@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: sipra-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sipra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sipra_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-sipra}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sipra} -d ${POSTGRES_DB:-sipra}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sipra-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: sipra-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - sipra-net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sipra-net:
+    driver: bridge

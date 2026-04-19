@@ -1,0 +1,32 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Go
+services/core-go/vendor/
+services/core-go/bin/
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+services/ai-brain/.venv/
+services/ai-brain/.env
+
+# Node
+node_modules/
+services/mocks/node_modules/
+services/web/.next/
+services/web/node_modules/
+services/web/out/
+
+# Docker volumes / data
+infra/volumes/
+
+# IDE
+.vscode/settings.json
+.idea/
+*.iml
+.claude/
