@@ -18,12 +18,20 @@ export interface CorridorUpdatePayload {
   polygon_geojson: Geometry;
 }
 
-export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE';
+export interface HandoffInitiatedPayload {
+  trip_id: string;
+  drone_id?: string;
+  eta_seconds?: number;
+  reason: string;
+  predicted_eta_seconds: number;
+}
+
+export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE' | 'HANDOFF_INITIATED';
 
 export interface WSEnvelope {
   type: WSMessageType;
   timestamp: string;
-  payload: GPSUpdatePayload | CorridorUpdatePayload;
+  payload: GPSUpdatePayload | CorridorUpdatePayload | HandoffInitiatedPayload;
 }
 
 export interface FleetVehicle {

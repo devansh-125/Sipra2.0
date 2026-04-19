@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Geometry } from 'geojson';
-import type { CorridorUpdatePayload, GPSUpdatePayload, WSEnvelope } from '../lib/types';
+import type { CorridorUpdatePayload, GPSUpdatePayload, HandoffInitiatedPayload, WSEnvelope } from '../lib/types';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -10,6 +10,7 @@ export interface SipraWSState {
   ambulanceLat: number | null;
   ambulanceLng: number | null;
   corridorGeoJSON: Geometry | null;
+  handoffState: HandoffInitiatedPayload | null;
   status: ConnectionStatus;
 }
 
@@ -25,6 +26,7 @@ export function useSipraWebSocket(url: string): SipraWSState {
     ambulanceLat: null,
     ambulanceLng: null,
     corridorGeoJSON: null,
+    handoffState: null,
     status: 'connecting',
   });
 
@@ -52,6 +54,9 @@ export function useSipraWebSocket(url: string): SipraWSState {
         } else if (msg.type === 'CORRIDOR_UPDATE') {
           const p = msg.payload as CorridorUpdatePayload;
           setState(s => ({ ...s, corridorGeoJSON: p.polygon_geojson }));
+        } else if (msg.type === 'HANDOFF_INITIATED') {
+          const p = msg.payload as HandoffInitiatedPayload;
+          setState(s => ({ ...s, handoffState: p }));
         }
       } catch {
         // malformed frame — discard silently
