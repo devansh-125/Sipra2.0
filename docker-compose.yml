@@ -37,6 +37,20 @@ services:
     networks:
       - sipra-net
 
+  ai-brain:
+    build:
+      context: ./services/ai-brain
+      dockerfile: Dockerfile
+    container_name: sipra-ai-brain
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sipra-net
+
 volumes:
   postgres_data:
   redis_data:

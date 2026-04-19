@@ -30,3 +30,5 @@ infra/volumes/
 .idea/
 *.iml
 .claude/
+
+CLAUDE.md
