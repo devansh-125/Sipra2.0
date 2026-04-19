@@ -51,6 +51,17 @@ services:
     networks:
       - sipra-net
 
+  drone-dispatch:
+    build:
+      context: ./services/mocks/drone-dispatch
+      dockerfile: Dockerfile
+    container_name: sipra-drone-dispatch
+    restart: unless-stopped
+    ports:
+      - "4003:4003"
+    networks:
+      - sipra-net
+
 volumes:
   postgres_data:
   redis_data:

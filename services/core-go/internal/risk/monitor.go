@@ -23,22 +23,24 @@ type PingStore interface {
 // Monitor polls Postgres for InTransit trips, calls the AI brain, and
 // transitions breaching trips to DroneHandoff.
 type Monitor struct {
-	trips     TripStore
-	pings     PingStore
-	predictor Predictor
-	hub       *ws.Hub
-	interval  time.Duration
+	trips      TripStore
+	pings      PingStore
+	predictor  Predictor
+	dispatcher DroneDispatcher
+	hub        *ws.Hub
+	interval   time.Duration
 }
 
 // NewMonitor wires the Monitor with its dependencies.
 // Both *pgstore.TripRepo and *pgstore.PingRepo satisfy the store interfaces.
-func NewMonitor(trips TripStore, pings PingStore, p Predictor, hub *ws.Hub, interval time.Duration) *Monitor {
+func NewMonitor(trips TripStore, pings PingStore, p Predictor, hub *ws.Hub, dispatcher DroneDispatcher, interval time.Duration) *Monitor {
 	return &Monitor{
-		trips:     trips,
-		pings:     pings,
-		predictor: p,
-		hub:       hub,
-		interval:  interval,
+		trips:      trips,
+		pings:      pings,
+		predictor:  p,
+		dispatcher: dispatcher,
+		hub:        hub,
+		interval:   interval,
 	}
 }
 
@@ -140,5 +142,29 @@ func (m *Monitor) evaluateTrip(ctx context.Context, trip domain.Trip) {
 		Str("reason", resp.Reasoning).
 		Msg("risk: trip transitioned to DroneHandoff")
 
-	m.hub.BroadcastHandoffInitiated(string(trip.ID), resp.Reasoning, resp.PredictedETASeconds)
+	// Call the drone dispatch API; degrade gracefully on failure.
+	droneID, droneETA := "", 0
+	dispCtx, dispCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dispCancel()
+
+	dr, err := m.dispatcher.Dispatch(dispCtx, DispatchRequest{
+		TripID:    string(trip.ID),
+		Pickup:    LatLng{Lat: ping.Location.Lat, Lng: ping.Location.Lng},
+		Dropoff:   LatLng{Lat: trip.Destination.Lat, Lng: trip.Destination.Lng},
+		CargoType: string(trip.Cargo.Category),
+		Priority:  "CRITICAL",
+	})
+	if err != nil {
+		log.Warn().Err(err).Str("trip", string(trip.ID)).Msg("risk: drone dispatch call failed, broadcasting without drone info")
+	} else {
+		droneID = dr.DroneID
+		droneETA = dr.ETASeconds
+		log.Info().
+			Str("trip", string(trip.ID)).
+			Str("drone", droneID).
+			Int("drone_eta_s", droneETA).
+			Msg("risk: drone dispatched")
+	}
+
+	m.hub.BroadcastHandoffInitiatedFull(string(trip.ID), droneID, droneETA, resp.Reasoning, resp.PredictedETASeconds)
 }

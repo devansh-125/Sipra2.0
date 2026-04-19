@@ -49,6 +49,17 @@ func (f *fakePredictor) Predict(_ context.Context, _ risk.PredictRequest) (*risk
 	return f.resp, f.err
 }
 
+type fakeDroneDispatcher struct {
+	resp        *risk.DispatchResponse
+	err         error
+	dispatched  []risk.DispatchRequest
+}
+
+func (f *fakeDroneDispatcher) Dispatch(_ context.Context, req risk.DispatchRequest) (*risk.DispatchResponse, error) {
+	f.dispatched = append(f.dispatched, req)
+	return f.resp, f.err
+}
+
 // --- helpers ---
 
 func inTransitTrip(id string) domain.Trip {
@@ -69,8 +80,11 @@ func latestPing(tripID string) *domain.GPSPing {
 	}
 }
 
-func newMonitor(trips risk.TripStore, pings risk.PingStore, p risk.Predictor) *risk.Monitor {
-	return risk.NewMonitor(trips, pings, p, ws.NewHub(), time.Hour)
+func newMonitor(trips risk.TripStore, pings risk.PingStore, p risk.Predictor, d risk.DroneDispatcher) *risk.Monitor {
+	if d == nil {
+		d = &fakeDroneDispatcher{resp: &risk.DispatchResponse{DroneID: "test-drone", ETASeconds: 300, Status: "DISPATCHED"}}
+	}
+	return risk.NewMonitor(trips, pings, p, ws.NewHub(), d, time.Hour)
 }
 
 // --- tests ---
@@ -82,7 +96,7 @@ func TestEvaluateOnce_HandoffWhenWillBreach(t *testing.T) {
 		WillBreach: true, PredictedETASeconds: 4500, Reasoning: "ETA exceeds deadline",
 	}}
 
-	newMonitor(trips, pings, pred).EvaluateOnce(context.Background())
+	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if len(trips.updated) != 1 || trips.updated[0] != "trip-1" {
 		t.Fatalf("expected trip-1 updated to DroneHandoff, got %v", trips.updated)
@@ -94,7 +108,7 @@ func TestEvaluateOnce_NoHandoffWhenNoBreach(t *testing.T) {
 	pings := &fakePingStore{ping: latestPing("trip-2")}
 	pred := &fakePredictor{resp: &risk.PredictResponse{WillBreach: false, PredictedETASeconds: 1800}}
 
-	newMonitor(trips, pings, pred).EvaluateOnce(context.Background())
+	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if len(trips.updated) != 0 {
 		t.Fatalf("expected no status update, got %v", trips.updated)
@@ -106,7 +120,7 @@ func TestEvaluateOnce_SkipsOnPredictError(t *testing.T) {
 	pings := &fakePingStore{ping: latestPing("trip-3")}
 	pred := &fakePredictor{err: errors.New("ai brain unreachable")}
 
-	newMonitor(trips, pings, pred).EvaluateOnce(context.Background())
+	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if len(trips.updated) != 0 {
 		t.Fatalf("expected no update on predict error, got %v", trips.updated)
@@ -118,7 +132,7 @@ func TestEvaluateOnce_SkipsOnNoPing(t *testing.T) {
 	pings := &fakePingStore{err: errors.New("no pings yet")}
 	pred := &fakePredictor{resp: &risk.PredictResponse{WillBreach: true}}
 
-	newMonitor(trips, pings, pred).EvaluateOnce(context.Background())
+	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if len(trips.updated) != 0 {
 		t.Fatalf("expected no update when ping unavailable, got %v", trips.updated)
@@ -139,7 +153,7 @@ func TestEvaluateOnce_SkipsAlreadyHandoff(t *testing.T) {
 	pings := &fakePingStore{ping: latestPing("trip-5")}
 	pred := &fakePredictor{resp: &risk.PredictResponse{WillBreach: true}}
 
-	newMonitor(trips, pings, pred).EvaluateOnce(context.Background())
+	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if len(trips.updated) != 0 {
 		t.Fatalf("expected no update for already-handoff trip, got %v", trips.updated)
@@ -162,10 +176,51 @@ func TestEvaluateOnce_UsesDefaultSpeedWhenNil(t *testing.T) {
 	trips := &fakeTripStore{trips: []domain.Trip{trip}}
 	pings := &fakePingStore{ping: ping}
 
-	newMonitor(trips, pings, pred).EvaluateOnce(context.Background())
+	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if capturedReq.AvgSpeedKPH != 40.0 {
 		t.Fatalf("expected default speed 40 kph, got %v", capturedReq.AvgSpeedKPH)
+	}
+}
+
+func TestEvaluateOnce_DispatchesDroneOnHandoff(t *testing.T) {
+	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-7")}}
+	pings := &fakePingStore{ping: latestPing("trip-7")}
+	pred := &fakePredictor{resp: &risk.PredictResponse{
+		WillBreach: true, PredictedETASeconds: 4500, Reasoning: "ETA exceeds deadline",
+	}}
+	drone := &fakeDroneDispatcher{
+		resp: &risk.DispatchResponse{DroneID: "SIPRA-DRONE-ABC123", ETASeconds: 240, Status: "DISPATCHED"},
+	}
+
+	newMonitor(trips, pings, pred, drone).EvaluateOnce(context.Background())
+
+	if len(drone.dispatched) != 1 {
+		t.Fatalf("expected 1 drone dispatch call, got %d", len(drone.dispatched))
+	}
+	req := drone.dispatched[0]
+	if req.TripID != "trip-7" {
+		t.Errorf("dispatch TripID = %q, want trip-7", req.TripID)
+	}
+	if req.Priority != "CRITICAL" {
+		t.Errorf("dispatch Priority = %q, want CRITICAL", req.Priority)
+	}
+}
+
+func TestEvaluateOnce_HandoffBroadcastsWithoutDroneOnDispatchError(t *testing.T) {
+	// Drone dispatch failure must not prevent the DroneHandoff transition from
+	// being persisted and the WebSocket event from being sent.
+	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-8")}}
+	pings := &fakePingStore{ping: latestPing("trip-8")}
+	pred := &fakePredictor{resp: &risk.PredictResponse{
+		WillBreach: true, PredictedETASeconds: 3600, Reasoning: "breach imminent",
+	}}
+	drone := &fakeDroneDispatcher{err: errors.New("drone fleet offline")}
+
+	newMonitor(trips, pings, pred, drone).EvaluateOnce(context.Background())
+
+	if len(trips.updated) != 1 || trips.updated[0] != "trip-8" {
+		t.Fatalf("expected trip-8 updated despite drone error, got %v", trips.updated)
 	}
 }
 

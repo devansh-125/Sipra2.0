@@ -21,6 +21,7 @@ type Config struct {
 	AiBrainURL        string `env:"AI_BRAIN_URL"           envDefault:"http://localhost:8000"`
 	RiskPollIntervalS int    `env:"RISK_POLL_INTERVAL_SEC" envDefault:"10"`
 	AiBrainTimeoutMS  int    `env:"AI_BRAIN_TIMEOUT_MS"    envDefault:"3000"`
+	MockDroneURL      string `env:"MOCK_DRONE_URL"         envDefault:"http://localhost:4003"`
 }
 
 // Load parses Config from the process environment.

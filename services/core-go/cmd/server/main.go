@@ -114,11 +114,16 @@ func main() {
 		cfg.AiBrainURL,
 		time.Duration(cfg.AiBrainTimeoutMS)*time.Millisecond,
 	)
+	droneClient := risk.NewDroneClient(
+		cfg.MockDroneURL,
+		time.Duration(cfg.AiBrainTimeoutMS)*time.Millisecond,
+	)
 	riskMonitor := risk.NewMonitor(
 		tripRepo,
 		pingRepo,
 		riskClient,
 		hub,
+		droneClient,
 		time.Duration(cfg.RiskPollIntervalS)*time.Second,
 	)
 	riskMonitor.Start(ctx)
