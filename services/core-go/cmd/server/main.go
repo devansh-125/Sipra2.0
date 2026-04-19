@@ -12,6 +12,7 @@ import (
 	"github.com/devansh-125/sipra/services/core-go/internal/config"
 	"github.com/devansh-125/sipra/services/core-go/internal/corridor"
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
+	"github.com/devansh-125/sipra/services/core-go/internal/risk"
 	pgstore "github.com/devansh-125/sipra/services/core-go/internal/store/postgres"
 	redisstore "github.com/devansh-125/sipra/services/core-go/internal/store/redis"
 	"github.com/devansh-125/sipra/services/core-go/internal/webhooks"
@@ -108,6 +109,19 @@ func main() {
 			Int("partners", n).
 			Msg("corridor broadcast enqueued")
 	})
+
+	riskClient := risk.NewClient(
+		cfg.AiBrainURL,
+		time.Duration(cfg.AiBrainTimeoutMS)*time.Millisecond,
+	)
+	riskMonitor := risk.NewMonitor(
+		tripRepo,
+		pingRepo,
+		riskClient,
+		hub,
+		time.Duration(cfg.RiskPollIntervalS)*time.Second,
+	)
+	riskMonitor.Start(ctx)
 
 	flushInterval := time.Duration(cfg.PingFlushIntervalS) * time.Second
 	go pingCache.FlushPingsToDB(ctx, flushInterval, pingRepo.BatchInsert,

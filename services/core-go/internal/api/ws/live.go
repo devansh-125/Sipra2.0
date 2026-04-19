@@ -15,8 +15,9 @@ import (
 type MessageType string
 
 const (
-	MsgGPSUpdate      MessageType = "GPS_UPDATE"
-	MsgCorridorUpdate MessageType = "CORRIDOR_UPDATE"
+	MsgGPSUpdate        MessageType = "GPS_UPDATE"
+	MsgCorridorUpdate   MessageType = "CORRIDOR_UPDATE"
+	MsgHandoffInitiated MessageType = "HANDOFF_INITIATED"
 )
 
 // Envelope is the discriminated-union wrapper for all outbound WebSocket messages.
@@ -34,6 +35,16 @@ type GPSUpdatePayload struct {
 	HeadingDeg *float64  `json:"heading_deg,omitempty"`
 	SpeedKPH   *float64  `json:"speed_kph,omitempty"`
 	RecordedAt time.Time `json:"recorded_at"`
+}
+
+// HandoffInitiatedPayload signals that the AI brain predicted an ETA breach
+// and the trip has been transitioned to DroneHandoff.
+type HandoffInitiatedPayload struct {
+	TripID              string `json:"trip_id"`
+	DroneID             string `json:"drone_id,omitempty"`
+	ETASeconds          int    `json:"eta_seconds,omitempty"`
+	Reason              string `json:"reason"`
+	PredictedETASeconds int    `json:"predicted_eta_seconds"`
 }
 
 // CorridorUpdatePayload carries the polygon as raw JSON so the frontend can
@@ -161,6 +172,28 @@ func (h *Hub) BroadcastCorridorUpdate(tripID, corridorID string, version, buffer
 			Version:        version,
 			BufferMeters:   bufferMeters,
 			PolygonGeoJSON: json.RawMessage(polygonGeoJSON),
+		},
+	})
+}
+
+// BroadcastHandoffInitiated fans a HANDOFF_INITIATED to every connected client.
+// droneID and etaSeconds are optional (populated in F3 once drone dispatch is wired).
+func (h *Hub) BroadcastHandoffInitiated(tripID, reason string, predictedETASeconds int) {
+	h.BroadcastHandoffInitiatedFull(tripID, "", 0, reason, predictedETASeconds)
+}
+
+// BroadcastHandoffInitiatedFull is the full-fidelity variant used by F3 once the drone
+// dispatch API returns a drone_id and eta_seconds.
+func (h *Hub) BroadcastHandoffInitiatedFull(tripID, droneID string, etaSeconds int, reason string, predictedETASeconds int) {
+	h.broadcast(Envelope{
+		Type:      MsgHandoffInitiated,
+		Timestamp: time.Now().UTC(),
+		Payload: HandoffInitiatedPayload{
+			TripID:              tripID,
+			DroneID:             droneID,
+			ETASeconds:          etaSeconds,
+			Reason:              reason,
+			PredictedETASeconds: predictedETASeconds,
 		},
 	})
 }

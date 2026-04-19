@@ -29,6 +29,43 @@ INSERT INTO gps_pings (
 )
 ON CONFLICT (id) DO NOTHING`
 
+const sqlGetLatestPing = `
+SELECT
+    id, trip_id,
+    ST_Y(location) AS lat,
+    ST_X(location) AS lng,
+    heading_deg, speed_kph, accuracy_m,
+    recorded_at, ingested_at
+FROM gps_pings
+WHERE trip_id = $1
+ORDER BY recorded_at DESC
+LIMIT 1`
+
+// GetLatest returns the most recent GPS ping for a trip.
+// Returns an error if no pings exist yet.
+func (r *PingRepo) GetLatest(ctx context.Context, tripID domain.TripID) (*domain.GPSPing, error) {
+	var (
+		p       domain.GPSPing
+		idStr   string
+		tripStr string
+	)
+	err := r.pool.QueryRow(ctx, sqlGetLatestPing, string(tripID)).Scan(
+		&idStr, &tripStr,
+		&p.Location.Lat, &p.Location.Lng,
+		&p.HeadingDeg, &p.SpeedKPH, &p.AccuracyM,
+		&p.RecordedAt, &p.IngestedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("no pings for trip %s", tripID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get latest ping for trip %s: %w", tripID, err)
+	}
+	p.ID = domain.PingID(idStr)
+	p.TripID = domain.TripID(tripStr)
+	return &p, nil
+}
+
 // BatchInsert writes a slice of pings to Postgres in a single network
 // round-trip using pgx's pipelined batch API.
 // Callers should pass the full set drained from Redis for one flush cycle.

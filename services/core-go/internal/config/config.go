@@ -17,6 +17,10 @@ type Config struct {
 	WebhookWorkers   int `env:"WEBHOOK_WORKERS"    envDefault:"8"`
 	WebhookQueueSize int `env:"WEBHOOK_QUEUE_SIZE" envDefault:"1024"`
 	WebhookTimeoutMS int `env:"WEBHOOK_TIMEOUT_MS" envDefault:"5000"`
+
+	AiBrainURL        string `env:"AI_BRAIN_URL"           envDefault:"http://localhost:8000"`
+	RiskPollIntervalS int    `env:"RISK_POLL_INTERVAL_SEC" envDefault:"10"`
+	AiBrainTimeoutMS  int    `env:"AI_BRAIN_TIMEOUT_MS"    envDefault:"3000"`
 }
 
 // Load parses Config from the process environment.

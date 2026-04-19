@@ -109,6 +109,71 @@ func (r *TripRepo) GetByID(ctx context.Context, id domain.TripID) (*domain.Trip,
 	return &t, nil
 }
 
+const sqlListInTransit = `
+SELECT
+    id, status,
+    cargo_type, cargo_description, cargo_tolerance_celsius,
+    ST_Y(origin)      AS origin_lat,
+    ST_X(origin)      AS origin_lng,
+    ST_Y(destination) AS dest_lat,
+    ST_X(destination) AS dest_lng,
+    golden_hour_deadline, started_at, completed_at,
+    ambulance_id, hospital_dispatch_id,
+    created_at, updated_at
+FROM trips WHERE status = 'InTransit'`
+
+// ListInTransit returns all trips currently in the InTransit state.
+// The Risk Monitor calls this on every poll cycle.
+func (r *TripRepo) ListInTransit(ctx context.Context) ([]domain.Trip, error) {
+	rows, err := r.pool.Query(ctx, sqlListInTransit)
+	if err != nil {
+		return nil, fmt.Errorf("list in-transit trips: %w", err)
+	}
+	defer rows.Close()
+
+	var trips []domain.Trip
+	for rows.Next() {
+		var (
+			t                  domain.Trip
+			idStr              string
+			statusStr          string
+			cargoTypeStr       string
+			hospitalDispatchID *string
+		)
+		if err := rows.Scan(
+			&idStr, &statusStr,
+			&cargoTypeStr, &t.Cargo.Description, &t.Cargo.ToleranceCelsius,
+			&t.Origin.Lat, &t.Origin.Lng,
+			&t.Destination.Lat, &t.Destination.Lng,
+			&t.GoldenHourDeadline, &t.StartedAt, &t.CompletedAt,
+			&t.AmbulanceID, &hospitalDispatchID,
+			&t.CreatedAt, &t.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan in-transit trip: %w", err)
+		}
+		t.ID = domain.TripID(idStr)
+		t.Status = domain.TripStatus(statusStr)
+		t.Cargo.Category = domain.CargoCategory(cargoTypeStr)
+		if hospitalDispatchID != nil {
+			t.HospitalDispatchID = *hospitalDispatchID
+		}
+		trips = append(trips, t)
+	}
+	return trips, rows.Err()
+}
+
+const sqlUpdateStatus = `UPDATE trips SET status = $2::trip_status, updated_at = $3 WHERE id = $1`
+
+// UpdateStatus persists a status transition that has already been validated by
+// the domain's TransitionTo method.
+func (r *TripRepo) UpdateStatus(ctx context.Context, id domain.TripID, status domain.TripStatus, now time.Time) error {
+	_, err := r.pool.Exec(ctx, sqlUpdateStatus, string(id), string(status), now)
+	if err != nil {
+		return fmt.Errorf("update trip %s status -> %s: %w", id, status, err)
+	}
+	return nil
+}
+
 // nullableStr returns nil for the empty string so Postgres stores NULL rather
 // than an empty TEXT value in optional columns.
 func nullableStr(s string) *string {
