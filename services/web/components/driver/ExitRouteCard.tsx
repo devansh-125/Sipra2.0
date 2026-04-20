@@ -82,49 +82,62 @@ export function useExitPathLayer(
   corridorGeoJSON: Geometry | null,
   driverPosition: LatLng,
   active: boolean,
+  targetOverride?: LatLng,
 ): PathLayer<{ path: Coord[] }> | null {
   return useMemo(() => {
-    if (!active || !corridorGeoJSON) return null;
-    if (corridorGeoJSON.type !== 'Polygon' && corridorGeoJSON.type !== 'MultiPolygon') return null;
+    if (!active) return null;
 
-    const target = nearestRingVertex(corridorGeoJSON, driverPosition);
-    if (!target) return null;
+    let target: Coord;
+    if (targetOverride) {
+      target = [targetOverride.lng, targetOverride.lat];
+    } else {
+      if (!corridorGeoJSON) return null;
+      if (corridorGeoJSON.type !== 'Polygon' && corridorGeoJSON.type !== 'MultiPolygon') return null;
+      const v = nearestRingVertex(corridorGeoJSON, driverPosition);
+      if (!v) return null;
+      target = v;
+    }
 
     const dp: Coord = [driverPosition.lng, driverPosition.lat];
     return new PathLayer<{ path: Coord[] }>({
       id: 'exit-route',
       data: [{ path: [dp, target] }],
       getPath: d => d.path,
-      getColor: [34, 197, 94, 255],
+      getColor: [250, 204, 21, 255],
       getWidth: 4,
       widthUnits: 'pixels',
       capRounded: true,
       pickable: false,
     });
-  }, [active, corridorGeoJSON, driverPosition.lat, driverPosition.lng]);
+  }, [active, corridorGeoJSON, driverPosition.lat, driverPosition.lng, targetOverride]);
 }
 
 interface ExitRouteCardProps {
   open: boolean;
   onDismiss: () => void;
   directionLabel: string;
+  targetOverride?: LatLng;
 }
 
-export function ExitRouteCard({ open, onDismiss, directionLabel }: ExitRouteCardProps) {
+export function ExitRouteCard({ open, onDismiss, directionLabel, targetOverride }: ExitRouteCardProps) {
+  const isCheckpoint = targetOverride !== undefined;
   return (
     <Sheet open={open} onOpenChange={v => { if (!v) onDismiss(); }}>
       <SheetContent side="bottom" className="rounded-t-2xl">
         <SheetHeader className="mb-4">
-          <SheetTitle>Exit Route</SheetTitle>
+          <SheetTitle>
+            {isCheckpoint ? 'Bounty Checkpoint' : 'Exit Route'}
+          </SheetTitle>
           <SheetDescription>
-            The map shows the nearest exit path in green. Follow the line to clear the
-            ambulance corridor.
+            {isCheckpoint
+              ? 'Follow the yellow line to reach your bounty checkpoint and earn 50 Google Points.'
+              : 'The map shows the nearest exit path. Follow the line to clear the ambulance corridor.'}
           </SheetDescription>
         </SheetHeader>
         {directionLabel ? (
           <p className="text-sm font-medium text-foreground mb-6">{directionLabel}</p>
         ) : (
-          <p className="text-sm text-muted-foreground mb-6">Calculating nearest exit…</p>
+          <p className="text-sm text-muted-foreground mb-6">Calculating route…</p>
         )}
         <SheetFooter>
           <Button onClick={onDismiss} className="w-full" size="lg">

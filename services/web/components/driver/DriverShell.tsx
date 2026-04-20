@@ -12,6 +12,8 @@ import { useSimulatedDriverPosition } from '../../hooks/useSimulatedDriverPositi
 import { useDriverProximity } from '../../hooks/useDriverProximity';
 import { useExitPathLayer, exitDirectionLabel, ExitRouteCard } from './ExitRouteCard';
 import { useBountyLifecycle } from '../../hooks/useBountyLifecycle';
+import { usePointsWallet } from '../../hooks/usePointsWallet';
+import { BountyModal } from './BountyModal';
 import { Badge } from '../ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -114,9 +116,11 @@ function InsideZoneCard({ onShowExitRoute }: { onShowExitRoute: () => void }) {
 function StatusStrip({
   tripId,
   wsStatus,
+  points,
 }: {
   tripId: string;
   wsStatus: string;
+  points: number;
 }) {
   const dotColor =
     wsStatus === 'connected'
@@ -128,6 +132,7 @@ function StatusStrip({
   return (
     <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-card/80 text-xs text-muted-foreground shrink-0">
       <span className="font-mono opacity-60">Trip {tripId.slice(0, 8)}&hellip;</span>
+      <span className="text-yellow-400 font-semibold">⭐ {points} pts</span>
       <div className="flex items-center gap-1.5">
         <div className={`w-2 h-2 rounded-full ${dotColor}`} />
         <span>{wsStatus}</span>
@@ -149,6 +154,12 @@ export default function DriverShell({ tripId }: { tripId: string }) {
   const { state: proximityState } = useDriverProximity(corridorGeoJSON, driverPosition);
   const [exitRouteOpen, setExitRouteOpen] = useState(false);
   const bountyLC = useBountyLifecycle(tripId, corridorGeoJSON, driverPosition, proximityState);
+  const wallet = usePointsWallet();
+
+  // Auto-open exit route sheet when bounty is claimed so the checkpoint polyline is visible.
+  useEffect(() => {
+    if (bountyLC.state === 'CLAIMED') setExitRouteOpen(true);
+  }, [bountyLC.state]);
 
   const driverLayer = useMemo(
     () =>
@@ -174,11 +185,31 @@ export default function DriverShell({ tripId }: { tripId: string }) {
     corridorGeoJSON,
     proximityState === 'INSIDE_ZONE' ? 2 : 1,
   );
-  const exitPathLayer = useExitPathLayer(corridorGeoJSON, driverPosition, exitRouteOpen);
-  const directionLabel = exitDirectionLabel(corridorGeoJSON, driverPosition);
+
+  // When CLAIMED, override the exit-path target to point at the bounty checkpoint.
+  const checkpointTarget =
+    bountyLC.state === 'CLAIMED' && bountyLC.checkpoint ? bountyLC.checkpoint : undefined;
+
+  const exitPathLayer = useExitPathLayer(
+    corridorGeoJSON,
+    driverPosition,
+    exitRouteOpen,
+    checkpointTarget,
+  );
+
+  // Direction label: show checkpoint info when CLAIMED, normal exit otherwise.
+  const directionLabel = useMemo(() => {
+    if (bountyLC.state === 'CLAIMED' && bountyLC.checkpoint && bountyLC.distanceToCheckpointM !== null) {
+      return `Head to checkpoint — ${Math.round(bountyLC.distanceToCheckpointM)}m away`;
+    }
+    return exitDirectionLabel(corridorGeoJSON, driverPosition);
+  }, [bountyLC.state, bountyLC.checkpoint, bountyLC.distanceToCheckpointM, corridorGeoJSON, driverPosition]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
+      {/* Bounty modal (OFFERED dialog / CLAIMED strip / VERIFIED overlay) */}
+      <BountyModal lifecycle={bountyLC} wallet={wallet} tripId={tripId} />
+
       {/* Top: 40vh map — exclusion polygon + driver dot, no ambulance */}
       <div className="relative shrink-0" style={{ height: '40vh' }}>
         <APIProvider apiKey={apiKey}>
@@ -208,15 +239,15 @@ export default function DriverShell({ tripId }: { tripId: string }) {
       </div>
 
       {/* Bottom: status strip */}
-      <StatusStrip tripId={tripId} wsStatus={status} />
+      <StatusStrip tripId={tripId} wsStatus={status} points={wallet.points} />
 
       {/* Exit route sheet — slides up from bottom */}
       <ExitRouteCard
         open={exitRouteOpen}
         onDismiss={() => setExitRouteOpen(false)}
         directionLabel={directionLabel}
+        targetOverride={checkpointTarget}
       />
-
     </div>
   );
 }
