@@ -124,6 +124,42 @@ Expected output:
 
 ---
 
+## Chaos demo: flooded bridge (Phase 6)
+
+The chaos script simulates a flooded bridge that stalls the ambulance at a
+fixed GPS position for 60 seconds, forcing the golden-hour deadline to breach
+and the full handoff pipeline to fire end-to-end.
+
+### What it does
+
+| Step | Action |
+|------|--------|
+| 1 | Creates a trip with a **2-minute golden-hour deadline** |
+| 2 | Transitions the trip to `InTransit` |
+| 3 | POSTs `speed_kph=0` pings at the same coordinate every second for 60 s |
+| 4 | Risk Monitor detects the stall, calls AI brain → `will_breach: true` |
+| 5 | Trip transitions to `DroneHandoff`; HandoffBanner fires on the dashboard |
+
+### Run it
+
+**Linux / macOS / WSL / Git Bash:**
+
+```bash
+bash scripts/chaos-flood-bridge.sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+.\scripts\chaos-flood-bridge.ps1
+```
+
+Both scripts accept a `BACKEND_URL` environment variable (default
+`http://localhost:8080`) and require the Go core API, AI brain (`:8000`), and
+mock drone dispatch (`:4003`) to be running.
+
+---
+
 ## Architecture
 
 ```
