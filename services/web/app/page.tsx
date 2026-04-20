@@ -1,5 +1,5 @@
-import MissionControlLayout from '../components/mission-control/MissionControlLayout';
+import { redirect } from 'next/navigation';
 
-export default function DashboardPage() {
-  return <MissionControlLayout />;
+export default function RootPage() {
+  redirect('/intake');
 }
