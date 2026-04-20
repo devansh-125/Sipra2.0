@@ -5,6 +5,7 @@ import (
 
 	"github.com/devansh-125/sipra/services/core-go/internal/api/ws"
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
+	"github.com/devansh-125/sipra/services/core-go/internal/metrics"
 	redisstore "github.com/devansh-125/sipra/services/core-go/internal/store/redis"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -83,6 +84,8 @@ func (h *PingHandler) IngestPing(c *fiber.Ctx) error {
 			"error": "ping cache unavailable, retry",
 		})
 	}
+
+	metrics.PingsIngested.WithLabelValues(string(tripID)).Inc()
 
 	if h.hub != nil {
 		h.hub.BroadcastGPSUpdate(ping)

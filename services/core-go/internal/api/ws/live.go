@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
+	"github.com/devansh-125/sipra/services/core-go/internal/metrics"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/rs/zerolog/log"
 )
@@ -106,6 +107,7 @@ func (h *Hub) register(conn *websocket.Conn) *client {
 	count := len(h.clients)
 	h.mu.Unlock()
 
+	metrics.WSClientsConnected.Set(float64(count))
 	log.Info().Uint64("client", cl.id).Int("total", count).Msg("ws: client connected")
 	return cl
 }
@@ -118,6 +120,7 @@ func (h *Hub) unregister(cl *client) {
 
 	cl.closeOnce.Do(func() { close(cl.send) })
 	_ = cl.conn.Close()
+	metrics.WSClientsConnected.Set(float64(count))
 	log.Info().Uint64("client", cl.id).Int("total", count).Msg("ws: client disconnected")
 }
 

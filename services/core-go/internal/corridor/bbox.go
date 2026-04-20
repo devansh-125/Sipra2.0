@@ -4,8 +4,10 @@ package corridor
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
+	"github.com/devansh-125/sipra/services/core-go/internal/metrics"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
@@ -86,6 +88,11 @@ RETURNING id, version, ST_AsGeoJSON(envelope)`
 // tripID atomically. Returns nil immediately when the trip has no pings yet.
 // Safe to call concurrently for distinct trip IDs.
 func (e *Engine) CalculateRollingCorridor(ctx context.Context, tripID domain.TripID) error {
+	start := time.Now()
+	defer func() {
+		metrics.CorridorComputeDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

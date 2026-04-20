@@ -6,6 +6,7 @@ import (
 
 	"github.com/devansh-125/sipra/services/core-go/internal/api/ws"
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
+	"github.com/devansh-125/sipra/services/core-go/internal/metrics"
 	"github.com/rs/zerolog/log"
 )
 
@@ -135,6 +136,8 @@ func (m *Monitor) evaluateTrip(ctx context.Context, trip domain.Trip) {
 		log.Error().Err(err).Str("trip", string(trip.ID)).Msg("risk: persist DroneHandoff failed")
 		return
 	}
+
+	metrics.HandoffsTriggered.WithLabelValues(resp.Reasoning).Inc()
 
 	log.Info().
 		Str("trip", string(trip.ID)).

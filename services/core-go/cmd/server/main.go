@@ -20,9 +20,11 @@ import (
 
 	fiberws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -152,6 +154,8 @@ func main() {
 	app.Use(logger.New(logger.Config{
 		Format: "${time} | ${status} | ${latency} | ${method} ${path}\n",
 	}))
+
+	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 
 	app.Get("/healthz", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
