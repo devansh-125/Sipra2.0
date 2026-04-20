@@ -47,51 +47,22 @@ function DeckGLOverlay({ layers }: { layers: (Layer | null)[] }) {
 }
 
 // --------------------------------------------------------------------------
-// HUD
+// MapLegend — bottom-right overlay (connection status lives in StatusBar)
 // --------------------------------------------------------------------------
-const STATUS_COLOR: Record<string, string> = {
-  connected: '#00e676',
-  connecting: '#ffab00',
-  disconnected: '#ff1744',
-};
-
-function HUD({
-  status,
-  fleetCount,
-  evadingCount,
-}: {
-  status: string;
-  fleetCount: number;
-  evadingCount: number;
-}) {
-  const color = STATUS_COLOR[status] ?? '#888';
+function MapLegend({ fleetCount, evadingCount }: { fleetCount: number; evadingCount: number }) {
   return (
-    <>
-      {/* Connection badge */}
-      <div style={{
-        position: 'absolute', top: 16, left: 16, zIndex: 10,
-        padding: '6px 16px', borderRadius: 20,
-        background: 'rgba(0,0,0,0.80)',
-        border: `1.5px solid ${color}`,
-        color, fontFamily: 'monospace', fontSize: 13, letterSpacing: 1,
-      }}>
-        ● {status.toUpperCase()}
-      </div>
-
-      {/* Legend */}
-      <div style={{
-        position: 'absolute', top: 16, right: 16, zIndex: 10,
-        padding: '10px 16px', borderRadius: 8,
-        background: 'rgba(0,0,0,0.80)',
-        color: '#fff', fontFamily: 'monospace', fontSize: 12, lineHeight: 2,
-        minWidth: 200,
-      }}>
-        <div style={{ color: '#ff2828', fontWeight: 700 }}>⬛ EXCLUSION ZONE</div>
-        <div style={{ color: '#1e78ff' }}>● FLEET  ({fleetCount} vehicles)</div>
-        <div style={{ color: '#ffa500' }}>● EVADING  ({evadingCount} rerouting)</div>
-        <div style={{ color: '#ffffff' }}>◎ AMBULANCE</div>
-      </div>
-    </>
+    <div style={{
+      position: 'absolute', top: 16, right: 16, zIndex: 10,
+      padding: '10px 16px', borderRadius: 8,
+      background: 'rgba(0,0,0,0.80)',
+      color: '#fff', fontFamily: 'monospace', fontSize: 12, lineHeight: 2,
+      minWidth: 200,
+    }}>
+      <div style={{ color: '#ff2828', fontWeight: 700 }}>⬛ EXCLUSION ZONE</div>
+      <div style={{ color: '#1e78ff' }}>● FLEET  ({fleetCount} vehicles)</div>
+      <div style={{ color: '#ffa500' }}>● EVADING  ({evadingCount} rerouting)</div>
+      <div style={{ color: '#ffffff' }}>◎ AMBULANCE</div>
+    </div>
   );
 }
 
@@ -105,7 +76,7 @@ interface CorridorMapProps {
 }
 
 function MapScene({ backendWsUrl, onHandoff }: { backendWsUrl: string; onHandoff?: (p: HandoffInitiatedPayload) => void }) {
-  const { ambulanceLat, ambulanceLng, corridorGeoJSON, handoffState, status } =
+  const { ambulanceLat, ambulanceLng, corridorGeoJSON, handoffState } =
     useSipraWebSocket(backendWsUrl);
 
   useEffect(() => {
@@ -161,7 +132,7 @@ function MapScene({ backendWsUrl, onHandoff }: { backendWsUrl: string; onHandoff
 
   return (
     <>
-      <HUD status={status} fleetCount={fleet.length} evadingCount={evadingCount} />
+      <MapLegend fleetCount={fleet.length} evadingCount={evadingCount} />
       <DeckGLOverlay layers={[exclusionLayer, fleetLayer, ambulanceLayer]} />
     </>
   );
