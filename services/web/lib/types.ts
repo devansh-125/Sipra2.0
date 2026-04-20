@@ -78,3 +78,46 @@ export interface FleetVehicle {
   lng: number;
   evading: boolean;
 }
+
+// -----------------------------------------------------------------------------
+// Bounty domain types (mirrors services/core-go/internal/domain/bounty.go)
+// -----------------------------------------------------------------------------
+
+export type BountyStatus = 'Offered' | 'Claimed' | 'Verified' | 'Expired';
+
+export interface Bounty {
+  id: string;
+  trip_id: string;
+  driver_ref: string;
+  partner_id?: string;
+  amount_points: number;
+  checkpoint: { lat: number; lng: number };
+  checkpoint_radius_m: number;
+  status: BountyStatus;
+  offered_at: string;
+  claimed_at?: string;
+  verified_at?: string;
+  expires_at: string;
+}
+
+export interface CreateBountyRequest {
+  driver_ref: string;
+  partner_id?: string;
+  base_amount_points: number;
+  corridor_length_m: number;
+  deviation_m: number;
+  checkpoint_lat: number;
+  checkpoint_lng: number;
+  checkpoint_radius_m: number;
+  expires_at: string; // RFC3339
+}
+
+export interface ClaimBountyResponse {
+  bounty_id: string;
+  status: string;
+}
+
+export interface VerifyBountyResponse {
+  bounty_id: string;
+  status: string;
+}

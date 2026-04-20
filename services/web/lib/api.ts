@@ -1,4 +1,4 @@
-import type { Trip } from './types';
+import type { Bounty, ClaimBountyResponse, CreateBountyRequest, Trip, VerifyBountyResponse } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_HTTP_URL ?? 'http://localhost:8080';
 
@@ -49,5 +49,38 @@ export function startTrip(id: string): Promise<StartTripResponse> {
   return fetchJSON<StartTripResponse>(
     `${BASE_URL}/api/v1/trips/${encodeURIComponent(id)}/start`,
     { method: 'POST' },
+  );
+}
+
+export function createBounty(tripId: string, body: CreateBountyRequest): Promise<Bounty> {
+  return fetchJSON<Bounty>(
+    `${BASE_URL}/api/v1/trips/${encodeURIComponent(tripId)}/bounties`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function claimBounty(bountyId: string): Promise<ClaimBountyResponse> {
+  return fetchJSON<ClaimBountyResponse>(
+    `${BASE_URL}/api/v1/bounties/${encodeURIComponent(bountyId)}/claim`,
+    { method: 'POST' },
+  );
+}
+
+export function verifyBounty(
+  bountyId: string,
+  pingLat: number,
+  pingLng: number,
+): Promise<VerifyBountyResponse> {
+  return fetchJSON<VerifyBountyResponse>(
+    `${BASE_URL}/api/v1/bounties/${encodeURIComponent(bountyId)}/verify`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ping_lat: pingLat, ping_lng: pingLng }),
+    },
   );
 }

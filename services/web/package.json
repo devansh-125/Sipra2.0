@@ -16,6 +16,8 @@
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
+    "@turf/boolean-point-in-polygon": "^7.3.5",
+    "@turf/distance": "^7.3.5",
     "@types/geojson": "^7946.0.14",
     "@vis.gl/react-google-maps": "^1.4.3",
     "class-variance-authority": "^0.7.1",
