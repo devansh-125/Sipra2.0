@@ -10,6 +10,7 @@ export interface RecentEvent {
   type: string;
   timestamp: string;
   ts: number;
+  truncated_payload?: string;
 }
 
 export interface SipraWSState {
@@ -27,7 +28,7 @@ export interface SipraWSState {
 
 // Backoff steps in ms: 1s → 2s → 4s → 8s, then capped at 10s.
 const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 10_000];
-const RING_SIZE = 10;
+const RING_SIZE = 200;
 
 declare global {
   interface Window {
@@ -85,7 +86,12 @@ export function useSipraWebSocket(
       try {
         const msg: WSEnvelope = JSON.parse(data as string);
         const now = Date.now();
-        const event: RecentEvent = { type: msg.type, timestamp: msg.timestamp, ts: now };
+        const event: RecentEvent = {
+          type: msg.type,
+          timestamp: msg.timestamp,
+          ts: now,
+          truncated_payload: JSON.stringify(msg.payload).slice(0, 120),
+        };
 
         setState(s => {
           const recentEvents = [event, ...s.recentEvents].slice(0, RING_SIZE);

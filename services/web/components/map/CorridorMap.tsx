@@ -28,10 +28,17 @@ function DeckGLOverlay({ layers }: { layers: (Layer | null)[] }) {
 
   useEffect(() => {
     if (!map) return;
-    overlayRef.current = new GoogleMapsOverlay({});
-    overlayRef.current.setMap(map);
+    const overlay = new GoogleMapsOverlay({ layers: [] });
+    overlayRef.current = overlay;
+    // Defer setMap to next animation frame — Google Maps calls draw() synchronously
+    // inside setMap, before the overlay's internal _map is set, causing addListener
+    // to be called on null. One RAF gives the map's own setup cycle time to complete.
+    const rafId = requestAnimationFrame(() => {
+      if (overlayRef.current === overlay) overlay.setMap(map);
+    });
     return () => {
-      overlayRef.current?.setMap(null);
+      cancelAnimationFrame(rafId);
+      overlay.setMap(null);
       overlayRef.current = null;
     };
   }, [map]);

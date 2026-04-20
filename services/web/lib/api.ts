@@ -84,3 +84,67 @@ export function verifyBounty(
     },
   );
 }
+
+// -----------------------------------------------------------------------------
+// Chaos API
+// -----------------------------------------------------------------------------
+
+export interface ChaosFloodBridgeResponse {
+  injected: number;
+  trip_id: string;
+}
+
+export interface ChaosSpawnFleetResponse {
+  spawned: number;
+  vehicle_ids: string[];
+}
+
+export interface ChaosForceHandoffResponse {
+  trip_id: string;
+  reason: string;
+  predicted_eta_seconds: number;
+}
+
+export interface ChaosResetResponse {
+  cleared_flooded_trips: number;
+  cleared_fleet_ids: number;
+}
+
+export function chaosFloodBridge(body: {
+  trip_id: string;
+  count: number;
+}): Promise<ChaosFloodBridgeResponse> {
+  return fetchJSON<ChaosFloodBridgeResponse>(`${BASE_URL}/api/v1/chaos/flood-bridge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function chaosSpawnFleet(body: {
+  count: number;
+  center_lat: number;
+  center_lng: number;
+  radius_m: number;
+}): Promise<ChaosSpawnFleetResponse> {
+  return fetchJSON<ChaosSpawnFleetResponse>(`${BASE_URL}/api/v1/chaos/spawn-fleet`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function chaosForceHandoff(body: {
+  trip_id: string;
+  reason: string;
+}): Promise<ChaosForceHandoffResponse> {
+  return fetchJSON<ChaosForceHandoffResponse>(`${BASE_URL}/api/v1/chaos/force-handoff`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function chaosReset(): Promise<ChaosResetResponse> {
+  return fetchJSON<ChaosResetResponse>(`${BASE_URL}/api/v1/chaos/reset`, { method: 'POST' });
+}
