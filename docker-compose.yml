@@ -51,6 +51,17 @@ services:
     networks:
       - sipra-net
 
+  fleet-receiver:
+    build:
+      context: ./services/mocks/fleet-receiver
+      dockerfile: Dockerfile
+    container_name: sipra-fleet-receiver
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    networks:
+      - sipra-net
+
   drone-dispatch:
     build:
       context: ./services/mocks/drone-dispatch

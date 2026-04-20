@@ -1,187 +1,163 @@
 # Sipra — Autonomous AI Orchestrator for Bio-Logistics
 
-Sipra coordinates emergency medical transport (organs, vaccines, blood) by:
-
-- Broadcasting a rolling 2 km exclusion corridor around the ambulance so partner fleets can reroute
-- Predicting whether the route ETA will breach the "golden hour" deadline
-- Triggering an autonomous drone handoff when a breach is imminent
-
----
-
-## Quick start
-
-```bash
-# 1. Infrastructure
-docker compose up -d          # postgres (PostGIS) + redis
-
-# 2. Go core API  :8080
-cd services/core-go && go run ./cmd/server
-
-# 3. Next.js dashboard  :3000
-cd services/web && npm run dev
-
-# 4. Mock fleet receiver  :4000
-cd services/mocks/fleet-receiver && npm start
-
-# 5. God-mode simulator (ambulance + 50 fleet vehicles)
-cd scripts && npm run simulate
-```
-
-> `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` must be set for the map to render.
-
----
-
-## Run the Phase 5 demo (AI brain + drone handoff)
-
-Phase 5 wires the AI prediction pipeline end-to-end:
-**ambulance ping → AI brain → Risk Monitor → drone dispatch → dashboard banner**
-
-### Start all Phase 5 services
-
-Open four terminals and run each command:
-
-```bash
-# Terminal 1 — Go core API
-cd services/core-go && go run ./cmd/server
-
-# Terminal 2 — AI brain  (Python 3.11, FastAPI)
-cd services/ai-brain && pip install -e ".[dev]" && uvicorn app.main:app --port 8000
-
-# Terminal 3 — Mock drone dispatch
-cd services/mocks/drone-dispatch && npm install && node index.js
-
-# Terminal 4 — Next.js dashboard  (optional, for visual confirmation)
-cd services/web && npm run dev
-```
-
-### Run the automated e2e test
-
-The test creates a trip with a **2-minute golden-hour deadline**, places the
-ambulance **50 km from the destination** (guaranteed ETA breach), then verifies
-the full pipeline fires within 90 seconds:
-
-```bash
-cd scripts && npm run e2e:handoff
-```
-
-Expected output:
-
-```
-=== Sipra Phase 5 E2E — handoff test ===
-
-── pre-flight checks ──
-  ✓  Go core API reachable
-  ✓  AI brain reachable
-  ✓  Drone mock reachable
-
-── create trip ──
-  trip_id : <uuid>
-  deadline: <now + 2 min>
-
-── start trip (Pending → InTransit) ──
-  status: InTransit
-
-── subscribing to dashboard WebSocket ──
-  WebSocket connected
-
-── sending pings from 50 km away ──
-  location: (12.5129, 77.6201)
-  duration: 25 s
-  sent 25 pings — waiting for Risk Monitor to pick up
-
-── polling for DroneHandoff ──
-  📡  HANDOFF_INITIATED received on WS
-  status: DroneHandoff
-
-── assertions ──
-  ✓  trip status flipped to DroneHandoff
-  ✓  mock drone dispatch received a call for this trip
-  ✓  dashboard WebSocket received HANDOFF_INITIATED
-
-✅  All assertions passed — Phase 5 handoff pipeline is working end-to-end.
-```
-
-### What the pipeline does
-
-| Step | Component | Action |
-|------|-----------|--------|
-| 1 | Go ingest | GPS ping buffered in Redis (202 immediately) |
-| 2 | Go flush ticker | Pings drained to Postgres every 5 s |
-| 3 | Risk Monitor | Polls InTransit trips every 10 s, calls AI brain |
-| 4 | AI brain `:8000` | Haversine + traffic factor → `will_breach: true` |
-| 5 | Risk Monitor | Transitions trip to `DroneHandoff` in Postgres |
-| 6 | Drone dispatch `:4003` | `POST /api/v1/drones/dispatch` → drone ID + ETA |
-| 7 | WS hub | Broadcasts `HANDOFF_INITIATED` to all dashboard clients |
-
-### Environment variables (all have defaults)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AI_BRAIN_URL` | `http://localhost:8000` | AI brain base URL |
-| `MOCK_DRONE_URL` | `http://localhost:4003` | Drone dispatch base URL |
-| `RISK_POLL_INTERVAL_SEC` | `10` | How often the Risk Monitor polls |
-| `PING_FLUSH_INTERVAL_SEC` | `5` | Redis → Postgres flush cadence |
-
----
-
-## Chaos demo: flooded bridge (Phase 6)
-
-The chaos script simulates a flooded bridge that stalls the ambulance at a
-fixed GPS position for 60 seconds, forcing the golden-hour deadline to breach
-and the full handoff pipeline to fire end-to-end.
-
-### What it does
-
-| Step | Action |
-|------|--------|
-| 1 | Creates a trip with a **2-minute golden-hour deadline** |
-| 2 | Transitions the trip to `InTransit` |
-| 3 | POSTs `speed_kph=0` pings at the same coordinate every second for 60 s |
-| 4 | Risk Monitor detects the stall, calls AI brain → `will_breach: true` |
-| 5 | Trip transitions to `DroneHandoff`; HandoffBanner fires on the dashboard |
-
-### Run it
-
-**Linux / macOS / WSL / Git Bash:**
-
-```bash
-bash scripts/chaos-flood-bridge.sh
-```
-
-**Windows (PowerShell):**
-
-```powershell
-.\scripts\chaos-flood-bridge.ps1
-```
-
-Both scripts accept a `BACKEND_URL` environment variable (default
-`http://localhost:8080`) and require the Go core API, AI brain (`:8000`), and
-mock drone dispatch (`:4003`) to be running.
+Sipra coordinates emergency medical transport (organs, vaccines, blood) with zero human intervention. It broadcasts a rolling 2 km exclusion corridor around the ambulance so partner fleets (Uber, Swiggy, etc.) can reroute instantly. When the AI brain predicts a golden-hour deadline breach, it autonomously dispatches a drone to complete the delivery.
 
 ---
 
 ## Architecture
 
 ```
-                    ┌──────────────────────────────────────┐
- Ambulance ─pings─▶ │  Go/Fiber core  :8080                │ ─WS─▶ Next.js dashboard :3000
-                    │   Redis hot cache → Postgres batch   │ ─webhook─▶ fleet-receiver :4000
-                    │   PostGIS ST_Buffer corridor engine  │ ─webhook─▶ drone-dispatch :4003
-                    │   Webhook worker pool + WS hub       │
-                    │   Risk Monitor ───poll───▶ AI brain  │
-                    └──────────────────────────────────────┘
-                                                  :8000 (FastAPI)
+                    ┌──────────────────────────────────────────────┐
+ Ambulance ─pings─▶ │  Go/Fiber core  :8080                        │ ─WS──────▶ Next.js dashboard :3000
+                    │   Redis hot cache → Postgres batch flush     │ ─webhook─▶ fleet-receiver    :4000
+                    │   PostGIS ST_Buffer(2 km) corridor engine    │ ─webhook─▶ drone-dispatch    :4003
+                    │   Webhook worker pool + WS broadcast hub     │
+                    │   Risk Monitor ─────poll────▶ AI brain :8000 │
+                    └──────────────────────────────────────────────┘
 ```
+
+Ingest is 202-immediate (Redis buffer); Postgres is the durable store, flushed every 5 s. Corridor rows are versioned and history-preserving — no UPDATE-in-place.
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| Core API | Go 1.26 · Fiber · pgx/v5 · redis/v9 · zerolog |
+| Database | Postgres 16 + PostGIS 3.4 |
+| Cache | Redis 7 |
+| AI brain | Python 3.11 · FastAPI · uvicorn |
+| Dashboard | Next.js 14 App Router · TypeScript strict · Deck.gl 9 · `@vis.gl/react-google-maps` |
+| Mock services | Node 18 · Express (fleet-receiver :4000, drone-dispatch :4003) |
+| Infrastructure | Docker Compose · PostGIS `ST_Buffer` · `ST_DWithin` |
+
+---
+
+## Quick start
+
+### 1. Environment setup
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and fill in:
+
+```
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<your key>   # required for the map to render
+```
+
+Get a key at [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Maps JavaScript API.
+
+### 2. Start the full backend with Docker Compose
+
+```bash
+docker compose up -d
+```
+
+This brings up **all backend services**:
+
+| Container | Port | Description |
+|-----------|------|-------------|
+| `sipra-postgres` | 5432 | Postgres 16 + PostGIS |
+| `sipra-redis` | 6379 | Redis 7 cache |
+| `sipra-ai-brain` | 8000 | Python FastAPI — ETA prediction |
+| `sipra-fleet-receiver` | 4000 | Mock B2B fleet webhook receiver |
+| `sipra-drone-dispatch` | 4003 | Mock drone dispatch API |
+
+### 3. Start the Go core API
+
+```bash
+cd services/core-go && go run ./cmd/server
+```
+
+Runs on `:8080`. WebSocket hub at `/ws/dashboard`.
+
+### 4. Start the Next.js dashboard
+
+```bash
+cd services/web && npm install && npm run dev
+```
+
+Opens on `:3000`.
+
+---
+
+## Demo scripts
+
+All scripts live in `scripts/`. Install once with `cd scripts && npm install`.
+
+| Command | Description |
+|---------|-------------|
+| `npm run simulate` | God-mode simulator — spawns a moving ambulance + 50 fleet vehicles over WebSocket |
+| `npm run e2e:handoff` | End-to-end Phase 5 test — creates a trip with a 2-min deadline 50 km away and asserts the full handoff pipeline fires within 90 s |
+| `bash scripts/chaos-flood-bridge.sh` | Chaos demo — stalls the ambulance at a flooded bridge for 60 s, forcing a golden-hour breach and drone handoff |
+| `.\scripts\chaos-flood-bridge.ps1` | Same chaos demo for Windows PowerShell |
+
+### Phase 5 e2e expected output
+
+```
+=== Sipra Phase 5 E2E — handoff test ===
+  ✓  Go core API reachable
+  ✓  AI brain reachable
+  ✓  Drone mock reachable
+  📡  HANDOFF_INITIATED received on WS
+  ✓  trip status flipped to DroneHandoff
+  ✓  mock drone dispatch received a call for this trip
+  ✓  dashboard WebSocket received HANDOFF_INITIATED
+✅  All assertions passed — Phase 5 handoff pipeline is working end-to-end.
+```
+
+---
 
 ## Repo layout
 
 | Path | Description |
 |------|-------------|
-| `services/core-go/` | Go/Fiber backbone — DDD, corridor engine, risk monitor |
+| `services/core-go/` | Go/Fiber backbone — DDD, corridor engine, risk monitor, bounty |
 | `services/web/` | Next.js 14 + Deck.gl dashboard |
-| `services/ai-brain/` | Python FastAPI — ETA prediction |
+| `services/ai-brain/` | Python FastAPI — haversine ETA prediction |
 | `services/mocks/fleet-receiver/` | Express mock for B2B corridor webhooks |
 | `services/mocks/drone-dispatch/` | Express mock drone dispatch API |
-| `scripts/simulate-gps.ts` | God-mode demo simulator |
+| `scripts/simulate-gps.ts` | God-mode ambulance + fleet simulator |
 | `scripts/e2e-handoff.ts` | Phase 5 end-to-end test |
-| `infra/docker/postgres/init.sql` | PostGIS schema bootstrap |
+| `infra/docker/postgres/init.sql` | PostGIS + uuid-ossp schema bootstrap |
+
+---
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgres://sipra:sipra_dev@postgres:5432/sipra` | Postgres connection string |
+| `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
+| `AI_BRAIN_URL` | `http://ai-brain:8000` | AI prediction service |
+| `MOCK_DRONE_URL` | `http://drone-dispatch:4003` | Drone dispatch mock |
+| `RISK_POLL_INTERVAL_SEC` | `10` | How often Risk Monitor polls InTransit trips |
+| `PING_FLUSH_INTERVAL_SEC` | `5` | Redis → Postgres flush cadence |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | — | **Required** — Google Maps JavaScript API key |
+
+Compose-internal service names (`postgres`, `redis`, `ai-brain`, etc.) are used as hostnames inside the Docker network. When running services locally outside Compose, point these at `localhost`.
+
+---
+
+## Troubleshooting
+
+**Map is blank / `InvalidKeyMapError`**
+Set `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` in `services/web/.env.local` (copy from `.env.local.example`).
+
+**`docker compose up` fails on PostGIS image pull**
+Run `docker pull postgis/postgis:16-3.4` separately on a stable connection, then retry.
+
+**Go core fails with `dial tcp 5432: connection refused`**
+Postgres takes ~5 s to initialize. Wait for `sipra-postgres` to show `healthy` in `docker compose ps`, then start the Go server.
+
+**AI brain container exits immediately**
+Check `docker compose logs ai-brain`. Most likely missing Python deps — rebuild with `docker compose build ai-brain`.
+
+**`npm run e2e:handoff` times out**
+Ensure all five backend services are running (Compose + Go core). The Risk Monitor polls every 10 s; the test allows 90 s total.
+
+**WebSocket disconnects after a few seconds**
+The WS hub drops slow clients. Check that the dashboard page is open and not backgrounded by the OS. Run the simulator (`npm run simulate`) to keep pings flowing.

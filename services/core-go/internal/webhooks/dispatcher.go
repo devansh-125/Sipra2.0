@@ -204,9 +204,40 @@ func (d *Dispatcher) worker(id int) {
 	log.Debug().Int("worker", id).Msg("webhook dispatcher: worker exit")
 }
 
-// dispatch sends a single signed POST. Errors are logged and swallowed;
-// retries are deferred to a future queue backed by the webhook_partners row.
+// retryDelays is a package-level var so tests can override it without forking
+// the binary. Production values: 500ms → 2s → 8s (×4 exponential backoff).
+var retryDelays = []time.Duration{
+	500 * time.Millisecond,
+	2 * time.Second,
+	8 * time.Second,
+}
+
+const maxAttempts = 3
+
+// dispatch sends a signed POST to the partner with exponential backoff retry.
+// It retries on network errors and 5xx responses; 4xx responses are treated as
+// authoritative failures and not retried. Cancelled via d.stopped.
 func (d *Dispatcher) dispatch(j job) {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			delay := retryDelays[attempt-2]
+			select {
+			case <-d.stopped:
+				return
+			case <-time.After(delay):
+			}
+		}
+
+		if d.doPost(j, attempt) {
+			return
+		}
+	}
+}
+
+// doPost performs a single HTTP POST and returns true when the delivery is
+// considered final (2xx/3xx/4xx). Returns false on network errors or 5xx,
+// signalling the caller to retry.
+func (d *Dispatcher) doPost(j job, attempt int) bool {
 	timeout := time.Duration(j.partner.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = d.client.Timeout
@@ -216,8 +247,11 @@ func (d *Dispatcher) dispatch(j job) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, j.partner.URL, bytes.NewReader(j.body))
 	if err != nil {
-		log.Error().Err(err).Str("partner", j.partner.Name).Msg("webhook: build request")
-		return
+		log.Error().Err(err).
+			Str("partner", j.partner.Name).
+			Int("attempt", attempt).
+			Msg("webhook: build request")
+		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "sipra-core/1.0")
@@ -233,9 +267,10 @@ func (d *Dispatcher) dispatch(j job) {
 		log.Error().Err(err).
 			Str("partner", j.partner.Name).
 			Str("trip", j.tripID).
+			Int("attempt", attempt).
 			Dur("latency", latency).
 			Msg("webhook: partner POST failed")
-		return
+		return false
 	}
 	defer resp.Body.Close()
 
@@ -246,8 +281,12 @@ func (d *Dispatcher) dispatch(j job) {
 	evt.Str("partner", j.partner.Name).
 		Str("trip", j.tripID).
 		Int("status", resp.StatusCode).
+		Int("attempt", attempt).
 		Dur("latency", latency).
 		Msg("webhook: delivered")
+
+	// 5xx is a transient server error — worth retrying.
+	return resp.StatusCode < 500
 }
 
 // sign returns "sha256=<hex>" using the partner's shared secret.
