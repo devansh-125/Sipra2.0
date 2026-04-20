@@ -3,8 +3,13 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
+import { ScrollArea } from '../ui/scroll-area';
 import { getTrip } from '../../lib/api';
+import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
 import type { Trip, TripStatus, CargoCategory } from '../../lib/types';
+
+const WS_URL =
+  process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/dashboard';
 
 const DEMO_TRIP_ID = process.env.NEXT_PUBLIC_DEMO_TRIP_ID ?? '';
 
@@ -32,11 +37,18 @@ function formatHMS(ms: number): string {
   return [h, m, sec].map(n => String(n).padStart(2, '0')).join(':');
 }
 
+function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 export default function TripPanel() {
   const [trip, setTrip] = useState<Trip | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [remaining, setRemaining] = useState(0);
+  const [eventsOpen, setEventsOpen] = useState(false);
+
+  const { recentEvents } = useSipraWebSocket(WS_URL);
 
   useEffect(() => {
     if (!DEMO_TRIP_ID) {
@@ -88,6 +100,8 @@ export default function TripPanel() {
     progress > 80 ? 'bg-red-500' :
     progress > 50 ? 'bg-amber-500' :
     'bg-green-500';
+
+  const recent5 = recentEvents.slice(0, 5);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -156,6 +170,46 @@ export default function TripPanel() {
             )}
           </div>
         </CardContent>
+      </Card>
+
+      {/* Recent events */}
+      <Card className="bg-card border-border">
+        <CardHeader
+          className="pb-2 cursor-pointer select-none"
+          onClick={() => setEventsOpen(o => !o)}
+        >
+          <CardTitle className="flex items-center justify-between text-xs font-mono text-muted-foreground uppercase tracking-widest">
+            <span>Recent Events</span>
+            <span className="text-muted-foreground">{eventsOpen ? '▲' : '▼'}</span>
+          </CardTitle>
+        </CardHeader>
+        {eventsOpen && (
+          <CardContent className="pt-0">
+            <ScrollArea className="h-32">
+              {recent5.length === 0 ? (
+                <p className="text-xs text-muted-foreground font-mono py-1">
+                  Waiting for events…
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {recent5.map(e => (
+                    <li
+                      key={`${e.type}-${e.ts}`}
+                      className="flex items-baseline justify-between gap-2"
+                    >
+                      <span className="font-mono text-xs text-foreground truncate">
+                        {e.type}
+                      </span>
+                      <span className="font-mono text-xs text-muted-foreground shrink-0">
+                        {formatTime(e.ts)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </ScrollArea>
+          </CardContent>
+        )}
       </Card>
     </div>
   );
