@@ -21,6 +21,7 @@ import (
 	fiberws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/adaptor"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -151,6 +152,7 @@ func main() {
 	})
 
 	app.Use(recover.New())
+	app.Use(cors.New())
 	app.Use(logger.New(logger.Config{
 		Format: "${time} | ${status} | ${latency} | ${method} ${path}\n",
 	}))
@@ -178,6 +180,7 @@ func main() {
 	pingHandler := rest.NewPingHandler(pingCache, hub)
 	bountyRepo := bounty.NewRepo(pool)
 	bountyHandler := rest.NewBountyHandler(tripRepo, bountyRepo)
+	chaosHandler := rest.NewChaosHandler(hub, pingCache, tripRepo, pingRepo, cfg.ChaosEnabled)
 
 	v1 := app.Group("/api/v1")
 	v1.Post("/trips", tripHandler.CreateTrip)
@@ -187,6 +190,16 @@ func main() {
 	v1.Post("/trips/:id/bounties", bountyHandler.CreateBounty)
 	v1.Post("/bounties/:id/claim", bountyHandler.ClaimBounty)
 	v1.Post("/bounties/:id/verify", bountyHandler.VerifyBounty)
+
+	chaos := v1.Group("/chaos")
+	chaos.Post("/flood-bridge", chaosHandler.FloodBridge)
+	chaos.Post("/spawn-fleet", chaosHandler.SpawnFleet)
+	chaos.Post("/force-handoff", chaosHandler.ForceHandoff)
+	chaos.Post("/reset", chaosHandler.Reset)
+
+	if cfg.ChaosEnabled {
+		log.Warn().Msg("chaos: endpoints ENABLED — do not use in production")
+	}
 
 	go func() {
 		<-ctx.Done()

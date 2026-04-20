@@ -58,11 +58,11 @@ WITH recent AS (
     LIMIT  $2
 )
 SELECT ST_AsEWKT(
-    ST_Buffer(
-        CASE WHEN COUNT(*) >= 2
-             THEN ST_MakeLine(location ORDER BY recorded_at ASC)
-             ELSE MAX(location)
-        END::geography,
+	ST_Buffer(
+		CASE WHEN COUNT(*) >= 2
+			 THEN ST_MakeLine(location ORDER BY recorded_at ASC)
+			 ELSE (ARRAY_AGG(location))[1]
+		END::geography,
         $3
     )::geometry
 )

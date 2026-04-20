@@ -40,4 +40,12 @@ var (
 			Help: "Currently connected dashboard WebSocket clients.",
 		},
 	)
+
+	ChaosTriggers = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sipra_chaos_triggers_total",
+			Help: "Chaos endpoint invocations by kind (flood-bridge, spawn-fleet, force-handoff, reset).",
+		},
+		[]string{"kind"},
+	)
 )

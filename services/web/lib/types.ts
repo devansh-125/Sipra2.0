@@ -64,12 +64,16 @@ export interface HandoffInitiatedPayload {
   predicted_eta_seconds: number;
 }
 
-export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE' | 'HANDOFF_INITIATED';
+export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE' | 'HANDOFF_INITIATED' | 'FLEET_UPDATE';
+
+export interface FleetUpdatePayload {
+  fleet: FleetVehicle[];
+}
 
 export interface WSEnvelope {
   type: WSMessageType;
   timestamp: string;
-  payload: GPSUpdatePayload | CorridorUpdatePayload | HandoffInitiatedPayload;
+  payload: GPSUpdatePayload | CorridorUpdatePayload | HandoffInitiatedPayload | FleetUpdatePayload | FleetVehicle[];
 }
 
 export interface FleetVehicle {

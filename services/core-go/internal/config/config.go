@@ -22,6 +22,8 @@ type Config struct {
 	RiskPollIntervalS int    `env:"RISK_POLL_INTERVAL_SEC" envDefault:"10"`
 	AiBrainTimeoutMS  int    `env:"AI_BRAIN_TIMEOUT_MS"    envDefault:"3000"`
 	MockDroneURL      string `env:"MOCK_DRONE_URL"         envDefault:"http://localhost:4003"`
+
+	ChaosEnabled bool `env:"CHAOS_ENABLED" envDefault:"false"`
 }
 
 // Load parses Config from the process environment.

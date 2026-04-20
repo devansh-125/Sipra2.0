@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Geometry } from 'geojson';
-import type { CorridorUpdatePayload, GPSUpdatePayload, HandoffInitiatedPayload, WSEnvelope } from '../lib/types';
+import type { CorridorUpdatePayload, GPSUpdatePayload, HandoffInitiatedPayload, WSEnvelope, FleetVehicle, FleetUpdatePayload } from '../lib/types';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -17,6 +17,7 @@ export interface SipraWSState {
   ambulanceLng: number | null;
   corridorGeoJSON: Geometry | null;
   handoffState: HandoffInitiatedPayload | null;
+  fleet: FleetVehicle[];
   status: ConnectionStatus;
   lastMessageAt: number | null;
   lastEnvelopeType: string | null;
@@ -42,6 +43,7 @@ export function useSipraWebSocket(
     ambulanceLng: null,
     corridorGeoJSON: null,
     handoffState: null,
+    fleet: [],
     status: 'connecting',
     lastMessageAt: null,
     lastEnvelopeType: null,
@@ -105,6 +107,11 @@ export function useSipraWebSocket(
           if (msg.type === 'HANDOFF_INITIATED') {
             const p = msg.payload as HandoffInitiatedPayload;
             return { ...base, handoffState: p };
+          }
+          if (msg.type === 'FLEET_UPDATE') {
+            const payload = msg.payload as FleetUpdatePayload | FleetVehicle[];
+            const fleet = Array.isArray(payload) ? payload : (payload as FleetUpdatePayload).fleet || [];
+            return { ...base, fleet };
           }
           return base;
         });

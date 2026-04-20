@@ -63,8 +63,9 @@ func (h *TripHandler) CreateTrip(c *fiber.Ctx) error {
 	}
 
 	trip := &domain.Trip{
+		Status: domain.TripStatusPending,
 		Cargo: domain.Cargo{
-			Category:         domain.CargoCategory(req.CargoCategory),
+			Category:         domain.CargoCategory(strings.Title(strings.ToLower(req.CargoCategory))),
 			Description:      req.CargoDescription,
 			ToleranceCelsius: req.CargoToleranceC,
 		},

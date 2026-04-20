@@ -78,6 +78,7 @@ interface CorridorMapProps {
 function MapScene({ backendWsUrl, onHandoff }: { backendWsUrl: string; onHandoff?: (p: HandoffInitiatedPayload) => void }) {
   const { ambulanceLat, ambulanceLng, corridorGeoJSON, handoffState } =
     useSipraWebSocket(backendWsUrl);
+  const map = useMap();
 
   useEffect(() => {
     if (handoffState) onHandoff?.(handoffState);

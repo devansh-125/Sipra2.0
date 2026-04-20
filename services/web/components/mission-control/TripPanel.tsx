@@ -192,9 +192,9 @@ export default function TripPanel() {
                 </p>
               ) : (
                 <ul className="space-y-1.5">
-                  {recent5.map(e => (
+                  {recent5.map((e, index) => (
                     <li
-                      key={`${e.type}-${e.ts}`}
+                      key={`${e.type}-${e.ts}-${index}`}
                       className="flex items-baseline justify-between gap-2"
                     >
                       <span className="font-mono text-xs text-foreground truncate">

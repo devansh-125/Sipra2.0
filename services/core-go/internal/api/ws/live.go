@@ -19,6 +19,7 @@ const (
 	MsgGPSUpdate        MessageType = "GPS_UPDATE"
 	MsgCorridorUpdate   MessageType = "CORRIDOR_UPDATE"
 	MsgHandoffInitiated MessageType = "HANDOFF_INITIATED"
+	MsgFleetSpawn       MessageType = "FLEET_SPAWN"
 )
 
 // Envelope is the discriminated-union wrapper for all outbound WebSocket messages.
@@ -56,6 +57,19 @@ type CorridorUpdatePayload struct {
 	Version        int             `json:"version"`
 	BufferMeters   int             `json:"buffer_meters"`
 	PolygonGeoJSON json.RawMessage `json:"polygon_geojson"`
+}
+
+// FleetVehicle is a single synthetic fleet vehicle broadcast by the chaos spawn-fleet endpoint.
+type FleetVehicle struct {
+	ID     string  `json:"id"`
+	Lat    float64 `json:"lat"`
+	Lng    float64 `json:"lng"`
+	Status string  `json:"status"`
+}
+
+// FleetSpawnPayload carries a batch of synthetic fleet vehicles to the dashboard.
+type FleetSpawnPayload struct {
+	Vehicles []FleetVehicle `json:"vehicles"`
 }
 
 // client owns one WebSocket connection and its serialized write channel.
@@ -198,6 +212,16 @@ func (h *Hub) BroadcastHandoffInitiatedFull(tripID, droneID string, etaSeconds i
 			Reason:              reason,
 			PredictedETASeconds: predictedETASeconds,
 		},
+	})
+}
+
+// BroadcastFleetSpawn fans a FLEET_SPAWN envelope to every connected dashboard client.
+// Used exclusively by the chaos spawn-fleet endpoint.
+func (h *Hub) BroadcastFleetSpawn(vehicles []FleetVehicle) {
+	h.broadcast(Envelope{
+		Type:      MsgFleetSpawn,
+		Timestamp: time.Now().UTC(),
+		Payload:   FleetSpawnPayload{Vehicles: vehicles},
 	})
 }
 
