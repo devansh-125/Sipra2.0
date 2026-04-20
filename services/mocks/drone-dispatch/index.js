@@ -14,6 +14,9 @@ const PORT = Number(process.env.PORT) || 4003;
 
 const app = express();
 
+// In-memory log of every dispatch call — queried by the e2e test via GET /calls.
+const dispatchCalls = [];
+
 app.use(express.json({ limit: "256kb" }));
 app.use(morgan("tiny"));
 
@@ -72,6 +75,13 @@ app.post("/api/v1/drones/dispatch", (req, res) => {
   const cruiseSpeedKmH = 120;
   const etaSeconds = Math.round((distKm / cruiseSpeedKmH) * 3600 + 60);
 
+  dispatchCalls.push({
+    trip_id: tripID,
+    drone_id: droneID,
+    eta_seconds: etaSeconds,
+    dispatched_at: new Date().toISOString(),
+  });
+
   console.log(`\n${GREEN}🚁 DRONE DISPATCH REQUEST${RESET}`);
   console.log(`${YELLOW}  trip_id    ${RESET}${tripID}`);
   console.log(`${YELLOW}  drone_id   ${RESET}${MAGENTA}${droneID}${RESET}`);
@@ -90,6 +100,10 @@ app.post("/api/v1/drones/dispatch", (req, res) => {
     eta_seconds: etaSeconds,
     status: "DISPATCHED",
   });
+});
+
+app.get("/calls", (_req, res) => {
+  res.json({ count: dispatchCalls.length, calls: dispatchCalls });
 });
 
 app.use((err, _req, res, _next) => {

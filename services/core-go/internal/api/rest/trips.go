@@ -2,6 +2,7 @@
 package rest
 
 import (
+	"strings"
 	"time"
 
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
@@ -100,5 +101,52 @@ func (h *TripHandler) CreateTrip(c *fiber.Ctx) error {
 		"trip_id":              string(trip.ID),
 		"status":               string(trip.Status),
 		"golden_hour_deadline": trip.GoldenHourDeadline.Format(time.RFC3339),
+	})
+}
+
+// GetTrip handles GET /api/v1/trips/:id.
+func (h *TripHandler) GetTrip(c *fiber.Ctx) error {
+	id := domain.TripID(c.Params("id"))
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "trip id is required"})
+	}
+	trip, err := h.trips.GetByID(c.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		}
+		log.Error().Err(err).Str("trip_id", string(id)).Msg("get trip: postgres error")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch trip"})
+	}
+	return c.JSON(trip)
+}
+
+// StartTrip handles POST /api/v1/trips/:id/start.
+// Transitions a Pending trip to InTransit so the risk monitor will begin evaluating it.
+func (h *TripHandler) StartTrip(c *fiber.Ctx) error {
+	id := domain.TripID(c.Params("id"))
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "trip id is required"})
+	}
+	trip, err := h.trips.GetByID(c.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		}
+		log.Error().Err(err).Str("trip_id", string(id)).Msg("start trip: fetch failed")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch trip"})
+	}
+	now := time.Now().UTC()
+	if err := trip.TransitionTo(domain.TripStatusInTransit, now); err != nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+	}
+	if err := h.trips.UpdateStatus(c.Context(), trip.ID, domain.TripStatusInTransit, now); err != nil {
+		log.Error().Err(err).Str("trip_id", string(id)).Msg("start trip: update status failed")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update trip status"})
+	}
+	log.Info().Str("trip_id", string(id)).Msg("trip started")
+	return c.JSON(fiber.Map{
+		"trip_id": string(trip.ID),
+		"status":  string(domain.TripStatusInTransit),
 	})
 }

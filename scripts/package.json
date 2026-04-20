@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "simulate": "tsx simulate-gps.ts"
+    "simulate": "tsx simulate-gps.ts",
+    "e2e:handoff": "tsx e2e-handoff.ts"
   },
   "dependencies": {
     "ws": "^8.18.0"

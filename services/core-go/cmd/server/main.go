@@ -9,6 +9,7 @@ import (
 
 	"github.com/devansh-125/sipra/services/core-go/internal/api/rest"
 	"github.com/devansh-125/sipra/services/core-go/internal/api/ws"
+	"github.com/devansh-125/sipra/services/core-go/internal/bounty"
 	"github.com/devansh-125/sipra/services/core-go/internal/config"
 	"github.com/devansh-125/sipra/services/core-go/internal/corridor"
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
@@ -171,10 +172,17 @@ func main() {
 
 	tripHandler := rest.NewTripHandler(tripRepo)
 	pingHandler := rest.NewPingHandler(pingCache, hub)
+	bountyRepo := bounty.NewRepo(pool)
+	bountyHandler := rest.NewBountyHandler(tripRepo, bountyRepo)
 
 	v1 := app.Group("/api/v1")
 	v1.Post("/trips", tripHandler.CreateTrip)
+	v1.Get("/trips/:id", tripHandler.GetTrip)
+	v1.Post("/trips/:id/start", tripHandler.StartTrip)
 	v1.Post("/trips/:id/pings", pingHandler.IngestPing)
+	v1.Post("/trips/:id/bounties", bountyHandler.CreateBounty)
+	v1.Post("/bounties/:id/claim", bountyHandler.ClaimBounty)
+	v1.Post("/bounties/:id/verify", bountyHandler.VerifyBounty)
 
 	go func() {
 		<-ctx.Done()
