@@ -125,7 +125,7 @@ function MapScene({ backendWsUrl, onHandoff }: { backendWsUrl: string; onHandoff
     });
   }, [ambulanceLat, ambulanceLng]);
 
-  const exclusionLayer = useExclusionLayer(corridorGeoJSON);
+  const exclusionLayer = useExclusionLayer(corridorGeoJSON, handoffState ? 2 : 1);
   const fleetLayer = useFleetLayer(fleet);
 
   const evadingCount = fleet.filter(v => v.evading).length;

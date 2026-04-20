@@ -29,16 +29,24 @@ interface ZoneData {
  * getLineWidth every frame; deck.gl reconciles only those uniforms without
  * re-uploading geometry buffers.
  *
+ * `intensity` multiplies the sine-wave amplitude (default 1; pass 2 during
+ * drone handoff for a more aggressive visual).
+ *
  * Returns null when no corridor has been received yet.
  */
-export function useExclusionLayer(corridorGeoJSON: Geometry | null): PolygonLayer<ZoneData> | null {
+export function useExclusionLayer(
+  corridorGeoJSON: Geometry | null,
+  intensity = 1,
+): PolygonLayer<ZoneData> | null {
   const [pulse, setPulse] = useState(0);
   const rafRef = useRef<number | null>(null);
+  const intensityRef = useRef(intensity);
+  intensityRef.current = intensity;
 
   useEffect(() => {
     const tick = (timestamp: number) => {
-      // Oscillate 0→1→0 at ~0.8 Hz
-      setPulse((Math.sin(timestamp * 0.005) + 1) / 2);
+      // Oscillate 0→1→0 at ~0.8 Hz, scaled by intensity.
+      setPulse(((Math.sin(timestamp * 0.005) + 1) / 2) * intensityRef.current);
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
