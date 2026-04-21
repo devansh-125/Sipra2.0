@@ -8,8 +8,9 @@ import type { Layer } from '@deck.gl/core';
 
 import { useExclusionLayer } from './ExclusionPolygon';
 import { useFleetLayer } from './FleetSwarm';
+import { useHospitalLayer } from './HospitalMarkers';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
-import type { FleetVehicle, HandoffInitiatedPayload } from '../../lib/types';
+import type { FleetVehicle, GeoPoint, HandoffInitiatedPayload } from '../../lib/types';
 
 // Default viewport: Indiranagar, Bangalore — matches the simulator's route origin.
 const DEFAULT_CENTER = { lat: 12.9783, lng: 77.6408 };
@@ -80,9 +81,21 @@ interface CorridorMapProps {
   googleMapsApiKey: string;
   backendWsUrl?: string;
   onHandoff?: (p: HandoffInitiatedPayload) => void;
+  origin?: GeoPoint;
+  destination?: GeoPoint;
 }
 
-function MapScene({ backendWsUrl, onHandoff }: { backendWsUrl: string; onHandoff?: (p: HandoffInitiatedPayload) => void }) {
+function MapScene({
+  backendWsUrl,
+  onHandoff,
+  origin,
+  destination,
+}: {
+  backendWsUrl: string;
+  onHandoff?: (p: HandoffInitiatedPayload) => void;
+  origin?: GeoPoint;
+  destination?: GeoPoint;
+}) {
   const { ambulanceLat, ambulanceLng, corridorGeoJSON, handoffState } =
     useSipraWebSocket(backendWsUrl);
   const map = useMap();
@@ -133,6 +146,7 @@ function MapScene({ backendWsUrl, onHandoff }: { backendWsUrl: string; onHandoff
     });
   }, [ambulanceLat, ambulanceLng]);
 
+  const hospitalLayer = useHospitalLayer(origin, destination);
   const exclusionLayer = useExclusionLayer(corridorGeoJSON, handoffState ? 2 : 1);
   const fleetLayer = useFleetLayer(fleet);
 
@@ -141,7 +155,7 @@ function MapScene({ backendWsUrl, onHandoff }: { backendWsUrl: string; onHandoff
   return (
     <>
       <MapLegend fleetCount={fleet.length} evadingCount={evadingCount} />
-      <DeckGLOverlay layers={[exclusionLayer, fleetLayer, ambulanceLayer]} />
+      <DeckGLOverlay layers={[hospitalLayer, exclusionLayer, fleetLayer, ambulanceLayer]} />
     </>
   );
 }
@@ -150,6 +164,8 @@ export default function CorridorMap({
   googleMapsApiKey,
   backendWsUrl = 'ws://localhost:8080/ws/dashboard',
   onHandoff,
+  origin,
+  destination,
 }: CorridorMapProps) {
   return (
     <APIProvider apiKey={googleMapsApiKey}>
@@ -161,7 +177,12 @@ export default function CorridorMap({
           gestureHandling="greedy"
           disableDefaultUI={false}
         >
-          <MapScene backendWsUrl={backendWsUrl} onHandoff={onHandoff} />
+          <MapScene
+            backendWsUrl={backendWsUrl}
+            onHandoff={onHandoff}
+            origin={origin}
+            destination={destination}
+          />
         </Map>
       </div>
     </APIProvider>
