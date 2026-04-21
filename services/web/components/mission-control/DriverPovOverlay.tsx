@@ -81,12 +81,15 @@ function DriverScene({
   onDistanceChange: (d: number | null) => void;
 }) {
   const { corridorGeoJSON } = useSipraWebSocket();
+  const { corridorGeometry: routeCorridor } = useMission();
+  // Prefer the road-aligned corridor; fall back to WS-pushed GeoJSON.
+  const corridorForDetection = (routeCorridor ?? corridorGeoJSON) as import('geojson').Geometry | null;
   const map = useMap();
   const didFitRef = useRef(false);
 
   const driverCenter = origin ?? DEFAULT_CENTER;
-  const driverPosition = useSimulatedDriverPosition(driverCenter, DRIVER_ORBIT_M);
-  const { state: baseState, distanceToEdgeM } = useDriverProximity(corridorGeoJSON, driverPosition);
+  const driverPosition = useSimulatedDriverPosition(driverCenter, DRIVER_ORBIT_M, 1000, polyline, 37);
+  const { state: baseState, distanceToEdgeM } = useDriverProximity(corridorForDetection, driverPosition);
 
   // Derive 3-state with hysteresis on the NEAR↔OUTSIDE threshold so small
   // distance jitter near the boundary doesn't strobe the UI.
@@ -96,10 +99,18 @@ function DriverScene({
       prevStateRef.current = 'INSIDE';
       return 'INSIDE';
     }
+    // WARNING maps directly to NEAR (no additional hysteresis needed;
+    // useDriverProximity already uses 150 m enter / 150 m exit threshold).
+    if (baseState === 'WARNING') {
+      prevStateRef.current = 'NEAR';
+      return 'NEAR';
+    }
     if (distanceToEdgeM === null) {
       prevStateRef.current = 'OUTSIDE';
       return 'OUTSIDE';
     }
+    // Apply hysteresis only on the NEAR↔OUTSIDE boundary to avoid strobe
+    // near the edge (e.g. due to floating-point jitter in the orbit).
     const prev = prevStateRef.current;
     let next: PovState;
     if (prev === 'NEAR') {
@@ -129,8 +140,9 @@ function DriverScene({
   }, [map, origin, destination, driverCenter.lat, driverCenter.lng]);
 
   const routePathLayer = useRoutePathLayer(origin, destination, polyline);
-  const hospitalLayer = useHospitalLayer(origin, destination);
-  const exclusionLayer = useExclusionLayer(corridorGeoJSON, povState === 'INSIDE' ? 2 : 1);
+  const hospitalLayers = useHospitalLayer(origin, destination);
+  // Use the same corridor that drove zone detection.
+  const exclusionLayer = useExclusionLayer(corridorForDetection, povState === 'INSIDE' ? 2 : 1);
 
   const driverLayer = useMemo(() => {
     const c = DRIVER_COLORS[povState];
@@ -159,7 +171,7 @@ function DriverScene({
   }, [driverPosition.lat, driverPosition.lng, povState]);
 
   return (
-    <DeckOverlay layers={[routePathLayer, hospitalLayer, exclusionLayer, driverLayer]} />
+    <DeckOverlay layers={[routePathLayer, ...hospitalLayers, exclusionLayer, driverLayer]} />
   );
 }
 

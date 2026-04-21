@@ -92,18 +92,84 @@ function crowFlyKm(a: GeoPoint, b: GeoPoint): number {
   return R * 2 * Math.atan2(Math.sqrt(c), Math.sqrt(1 - c));
 }
 
+// ---------------------------------------------------------------------------
+// Predefined fallback road waypoints — Victoria Hospital → Manipal HAL
+// Hand-traced along Bangalore roads: Krishnarajendra Rd → KR Circle →
+// Kasturba Rd → MG Road → CMH Road → Old Airport Road corridor.
+// Used when the Directions API is unavailable to keep the ambulance on roads.
+// ---------------------------------------------------------------------------
+const FALLBACK_ROAD_WAYPOINTS: GeoPoint[] = [
+  { lat: 12.9656, lng: 77.5713 }, // Victoria Hospital (origin)
+  { lat: 12.9661, lng: 77.5740 }, // KR Circle approach
+  { lat: 12.9668, lng: 77.5773 }, // KR Circle
+  { lat: 12.9680, lng: 77.5810 }, // Kasturba Rd
+  { lat: 12.9697, lng: 77.5850 }, // Raj Bhavan Rd junction
+  { lat: 12.9712, lng: 77.5893 }, // MG Road start
+  { lat: 12.9718, lng: 77.5930 }, // MG Road (Brigade Rd)
+  { lat: 12.9722, lng: 77.5965 }, // MG Road (Lavelle Rd)
+  { lat: 12.9726, lng: 77.5998 }, // MG Road (Richmond Rd)
+  { lat: 12.9735, lng: 77.6035 }, // MG Road (Ulsoor Lake)
+  { lat: 12.9745, lng: 77.6075 }, // Trinity junction
+  { lat: 12.9757, lng: 77.6112 }, // Halasuru / Ulsoor
+  { lat: 12.9763, lng: 77.6145 }, // CMH Road start
+  { lat: 12.9770, lng: 77.6180 }, // CMH Road mid
+  { lat: 12.9775, lng: 77.6218 }, // Indiranagar 1st stage
+  { lat: 12.9778, lng: 77.6255 }, // Indiranagar 100ft road
+  { lat: 12.9774, lng: 77.6292 }, // Indiranagar 2nd stage
+  { lat: 12.9768, lng: 77.6330 }, // Domlur flyover approach
+  { lat: 12.9760, lng: 77.6368 }, // Old Airport Rd junction
+  { lat: 12.9750, lng: 77.6400 }, // Old Airport Road
+  { lat: 12.9740, lng: 77.6428 }, // HAL Old Airport Rd
+  { lat: 12.9620, lng: 77.6440 }, // Jeevanbhima Nagar
+  { lat: 12.9600, lng: 77.6443 }, // Manipal Hospital approach
+  { lat: 12.9587, lng: 77.6442 }, // Manipal Hospital HAL (destination)
+];
+
+/**
+ * Blend the predefined Bangalore road waypoints toward the actual origin/destination.
+ * If the trip endpoints are close to the defaults, use the real road path.
+ * If they are far away, fall back to straight-line interpolation so we don't
+ * send the ambulance across the city to the wrong place.
+ */
 function simulatedRoute(origin: GeoPoint, destination: GeoPoint): ResolvedRoute {
-  const STEPS = 20;
+  const defaultOriginDist = crowFlyKm(origin, FALLBACK_ORIGIN);
+  const defaultDestDist   = crowFlyKm(destination, FALLBACK_DESTINATION);
+
+  // If both endpoints are within 3 km of the predefined Bangalore hospitals,
+  // use the hand-traced road waypoints — they look realistic on the map.
+  if (defaultOriginDist < 3 && defaultDestDist < 3) {
+    const distKm     = crowFlyKm(FALLBACK_ORIGIN, FALLBACK_DESTINATION);
+    const etaSeconds = Math.round((distKm * 1.4 / AVG_AMBULANCE_KPH) * 3600);
+    return { polyline: FALLBACK_ROAD_WAYPOINTS, etaSeconds, routeSource: 'simulation' };
+  }
+
+  // Generic fallback: generate a curved path by adding 2 intermediate via-points
+  // offset perpendicular to the straight line so the ambulance at least curves.
+  const mid1: GeoPoint = {
+    lat: origin.lat + (destination.lat - origin.lat) * 0.33 + (destination.lng - origin.lng) * 0.03,
+    lng: origin.lng + (destination.lng - origin.lng) * 0.33 - (destination.lat - origin.lat) * 0.03,
+  };
+  const mid2: GeoPoint = {
+    lat: origin.lat + (destination.lat - origin.lat) * 0.67 - (destination.lng - origin.lng) * 0.03,
+    lng: origin.lng + (destination.lng - origin.lng) * 0.67 + (destination.lat - origin.lat) * 0.03,
+  };
+  const viaPoints = [origin, mid1, mid2, destination];
+
+  // Interpolate 24 steps through those 4 control points for a smooth curve.
+  const STEPS = 24;
   const polyline: GeoPoint[] = [];
   for (let i = 0; i <= STEPS; i++) {
-    const t = i / STEPS;
-    polyline.push({
-      lat: origin.lat + (destination.lat - origin.lat) * t,
-      lng: origin.lng + (destination.lng - origin.lng) * t,
-    });
+    const t        = i / STEPS;
+    const segCount = viaPoints.length - 1;
+    const segF     = t * segCount;
+    const segIdx   = Math.min(Math.floor(segF), segCount - 1);
+    const segT     = segF - segIdx;
+    const a        = viaPoints[segIdx];
+    const b        = viaPoints[segIdx + 1];
+    polyline.push({ lat: a.lat + (b.lat - a.lat) * segT, lng: a.lng + (b.lng - a.lng) * segT });
   }
-  const distKm = crowFlyKm(origin, destination);
-  // Assume road distance is ~1.4× crow-fly.
+
+  const distKm     = crowFlyKm(origin, destination);
   const etaSeconds = Math.round((distKm * 1.4 / AVG_AMBULANCE_KPH) * 3600);
   return { polyline, etaSeconds, routeSource: 'simulation' };
 }

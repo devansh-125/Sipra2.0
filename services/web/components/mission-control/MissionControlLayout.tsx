@@ -24,7 +24,7 @@ function MissionLayout() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
   const {
     origin, destination, polyline, etaSeconds, routeSource,
-    trip,
+    corridorGeometry, trip,
   } = useMission();
   const [povOpen, setPovOpen] = useState(false);
 
@@ -49,6 +49,7 @@ function MissionLayout() {
             etaSeconds={etaSeconds}
             startedAt={trip?.started_at}
             routeSource={routeSource}
+            corridorGeometry={corridorGeometry}
           />
         </main>
       </div>

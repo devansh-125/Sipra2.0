@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { ScatterplotLayer } from '@deck.gl/layers';
@@ -17,6 +17,20 @@ import { BountyModal } from './BountyModal';
 import { Badge } from '../ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
+import { MissionContext } from '../../lib/MissionContext';
+
+// Utility: safely consume MissionContext corridor — returns null if not inside a provider.
+// Uses useContext directly (never throws, returns null when context is absent).
+function useSafeMissionCorridor(): import('geojson').Geometry | null {
+  const ctx = useContext(MissionContext);
+  return ctx?.corridorGeometry ?? null;
+}
+
+// Utility: safely consume MissionContext polyline — returns [] if not inside a provider.
+function useSafeMissionPolyline(): import('../../lib/types').GeoPoint[] {
+  const ctx = useContext(MissionContext);
+  return ctx?.polyline ?? [];
+}
 
 const INDIRANAGAR = { lat: 12.9783, lng: 77.6408 };
 const ORBIT_RADIUS_M = 800;
@@ -81,6 +95,30 @@ function NormalCard({ tripId }: { tripId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// WARNING state card — corridor is approaching (within 150 m)
+// ---------------------------------------------------------------------------
+function WarningCard() {
+  return (
+    <Card className="border-amber-600/60 bg-amber-950/20">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <Badge className="bg-amber-500 text-black border-0 text-xs animate-pulse">⚠ Corridor nearby</Badge>
+        </div>
+        <CardTitle className="text-base mt-2 text-amber-300">
+          Emergency corridor approaching
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground mb-2">
+          An ambulance corridor is active within 150 m. Prepare to reroute.
+        </p>
+        <p className="text-xs text-amber-400/70 font-mono">Slow down and stay clear of the marked zone.</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // INSIDE_ZONE state card — "Reroute and earn reward?"
 // ---------------------------------------------------------------------------
 function InsideZoneCard({ onShowExitRoute }: { onShowExitRoute: () => void }) {
@@ -88,7 +126,7 @@ function InsideZoneCard({ onShowExitRoute }: { onShowExitRoute: () => void }) {
     <Card className="border-red-700/60 bg-red-950/30">
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
-          <Badge className="bg-amber-500 text-black border-0 text-xs">Corridor active</Badge>
+          <Badge className="bg-red-600 text-white border-0 text-xs animate-pulse">🚨 Inside corridor</Badge>
         </div>
         <CardTitle className="text-base mt-2 text-red-300">
           Reroute and earn reward?
@@ -164,10 +202,12 @@ function StatusStrip({
   tripId,
   wsStatus,
   points,
+  corridorSource,
 }: {
   tripId: string;
   wsStatus: string;
   points: number;
+  corridorSource: 'road-aligned' | 'ws-based' | 'none';
 }) {
   const dotColor =
     wsStatus === 'connected'
@@ -176,9 +216,15 @@ function StatusStrip({
         ? 'bg-yellow-400 animate-pulse'
         : 'bg-red-500';
 
+  const srcLabel =
+    corridorSource === 'road-aligned' ? '🟢 Road-aligned'
+    : corridorSource === 'ws-based'   ? '🟡 Ping-based'
+    : '';
+
   return (
     <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-card/80 text-xs text-muted-foreground shrink-0">
       <span className="font-mono opacity-60">Trip {tripId.slice(0, 8)}&hellip;</span>
+      {srcLabel && <span className="opacity-70">{srcLabel}</span>}
       <span className="text-yellow-400 font-semibold">⭐ {points} pts</span>
       <div className="flex items-center gap-1.5">
         <div className={`w-2 h-2 rounded-full ${dotColor}`} />
@@ -197,16 +243,34 @@ export default function DriverShell({ tripId }: { tripId: string }) {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
   const { corridorGeoJSON, status } = useSipraWebSocket(wsUrl);
-  const driverPosition = useSimulatedDriverPosition(INDIRANAGAR, ORBIT_RADIUS_M);
-  const { state: proximityState } = useDriverProximity(corridorGeoJSON, driverPosition);
+  const missionPolyline = useSafeMissionPolyline();
+  const driverPosition = useSimulatedDriverPosition(INDIRANAGAR, ORBIT_RADIUS_M, 1000, missionPolyline.length >= 2 ? missionPolyline : undefined, 71);
+
+  // Road-aligned corridor from MissionContext (same shape used in Mission Control).
+  const missionCorridor = useSafeMissionCorridor();
+
+  // Priority: MissionContext road-aligned → WS-pushed GeoJSON (ping-based) → null
+  const activeCorridor = missionCorridor ?? corridorGeoJSON;
+  const corridorSource: 'road-aligned' | 'ws-based' | 'none' =
+    missionCorridor ? 'road-aligned'
+    : corridorGeoJSON ? 'ws-based'
+    : 'none';
+
+  const { state: proximityState } = useDriverProximity(activeCorridor, driverPosition);
   const [exitRouteOpen, setExitRouteOpen] = useState(false);
-  const bountyLC = useBountyLifecycle(tripId, corridorGeoJSON, driverPosition, proximityState);
+  const bountyLC = useBountyLifecycle(tripId, activeCorridor, driverPosition, proximityState);
   const wallet = usePointsWallet();
 
   // Auto-open exit route sheet when bounty is claimed so the checkpoint polyline is visible.
   useEffect(() => {
     if (bountyLC.state === 'CLAIMED') setExitRouteOpen(true);
   }, [bountyLC.state]);
+
+  // Driver marker color depends on proximity state.
+  const driverFillColor: [number, number, number, number] =
+    proximityState === 'INSIDE_ZONE' ? [239, 68, 68, 240]  // red
+    : proximityState === 'WARNING'   ? [250, 204, 21, 240] // amber
+    : [34, 197, 94, 230];                                   // green
 
   const driverLayer = useMemo(
     () =>
@@ -215,21 +279,25 @@ export default function DriverShell({ tripId }: { tripId: string }) {
         data: [{ lat: driverPosition.lat, lng: driverPosition.lng }],
         getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
         getRadius: 12,
-        getFillColor: [34, 197, 94, 230],
+        getFillColor: driverFillColor,
         getLineColor: [255, 255, 255, 200],
         getLineWidth: 2,
         lineWidthUnits: 'pixels',
         radiusUnits: 'pixels',
         stroked: true,
         pickable: false,
-        transitions: { getPosition: { duration: 300 } },
+        transitions: {
+          getPosition: { duration: 300 },
+          getFillColor: { duration: 200 },
+        },
+        updateTriggers: { getFillColor: proximityState },
       }),
-    [driverPosition.lat, driverPosition.lng],
+    [driverPosition.lat, driverPosition.lng, driverFillColor, proximityState],
   );
 
   // Ambulance dot is intentionally absent — driver MUST NOT see it.
   const exclusionLayer = useExclusionLayer(
-    corridorGeoJSON,
+    activeCorridor,
     proximityState === 'INSIDE_ZONE' ? 2 : 1,
   );
 
@@ -238,7 +306,7 @@ export default function DriverShell({ tripId }: { tripId: string }) {
     bountyLC.state === 'CLAIMED' && bountyLC.checkpoint ? bountyLC.checkpoint : undefined;
 
   const exitPathLayer = useExitPathLayer(
-    corridorGeoJSON,
+    activeCorridor,
     driverPosition,
     exitRouteOpen,
     checkpointTarget,
@@ -249,8 +317,14 @@ export default function DriverShell({ tripId }: { tripId: string }) {
     if (bountyLC.state === 'CLAIMED' && bountyLC.checkpoint && bountyLC.distanceToCheckpointM !== null) {
       return `Head to checkpoint — ${Math.round(bountyLC.distanceToCheckpointM)}m away`;
     }
-    return exitDirectionLabel(corridorGeoJSON, driverPosition);
-  }, [bountyLC.state, bountyLC.checkpoint, bountyLC.distanceToCheckpointM, corridorGeoJSON, driverPosition]);
+    return exitDirectionLabel(activeCorridor, driverPosition);
+  }, [bountyLC.state, bountyLC.checkpoint, bountyLC.distanceToCheckpointM, activeCorridor, driverPosition]);
+
+  // Map border color driven by proximity state.
+  const mapBorderColor =
+    proximityState === 'INSIDE_ZONE' ? 'border-red-600'
+    : proximityState === 'WARNING'   ? 'border-amber-500'
+    : 'border-transparent';
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -258,7 +332,7 @@ export default function DriverShell({ tripId }: { tripId: string }) {
       <BountyModal lifecycle={bountyLC} wallet={wallet} tripId={tripId} />
 
       {/* Top: 40vh map — exclusion polygon + driver dot, no ambulance */}
-      <div className="relative shrink-0" style={{ height: '40vh' }}>
+      <div className={`relative shrink-0 border-2 transition-colors duration-300 ${mapBorderColor}`} style={{ height: '40vh' }}>
         <APIProvider apiKey={apiKey}>
           <Map
             defaultCenter={INDIRANAGAR}
@@ -274,6 +348,20 @@ export default function DriverShell({ tripId }: { tripId: string }) {
             />
           </Map>
         </APIProvider>
+
+        {/* In-map proximity alert banner */}
+        {proximityState === 'WARNING' && (
+          <div className="absolute top-2 left-2 right-2 z-10 rounded-lg border border-amber-400 bg-amber-500/90 text-black text-xs font-bold px-3 py-1.5 flex items-center gap-2 shadow-lg">
+            <span>⚠</span>
+            <span>Emergency corridor within 150 m — prepare to reroute</span>
+          </div>
+        )}
+        {proximityState === 'INSIDE_ZONE' && (
+          <div className="absolute top-2 left-2 right-2 z-10 rounded-lg border border-red-400 bg-red-600/95 text-white text-xs font-bold px-3 py-1.5 flex items-center gap-2 shadow-lg animate-pulse">
+            <span>🚨</span>
+            <span>Inside emergency corridor — evacuate now</span>
+          </div>
+        )}
       </div>
 
       {/* Reroute status badge — shows Rerouting / Completed / Failed */}
@@ -287,13 +375,15 @@ export default function DriverShell({ tripId }: { tripId: string }) {
       <div className="flex-1 overflow-auto p-4 min-h-0">
         {proximityState === 'NORMAL' ? (
           <NormalCard tripId={tripId} />
+        ) : proximityState === 'WARNING' ? (
+          <WarningCard />
         ) : (
           <InsideZoneCard onShowExitRoute={() => setExitRouteOpen(true)} />
         )}
       </div>
 
       {/* Bottom: status strip */}
-      <StatusStrip tripId={tripId} wsStatus={status} points={wallet.points} />
+      <StatusStrip tripId={tripId} wsStatus={status} points={wallet.points} corridorSource={corridorSource} />
 
       {/* Exit route sheet — slides up from bottom */}
       <ExitRouteCard

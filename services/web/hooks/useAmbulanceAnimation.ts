@@ -6,8 +6,9 @@
  * Drives the ambulance dot's on-screen position by blending two sources:
  *
  *   Primary  : Live GPS_UPDATE frames from the Go backend (useSipraWebSocket).
- *              When a new frame arrives it snaps the position immediately, then
- *              the CSS transition on the deck.gl ScatterplotLayer smooths it.
+ *              When a new frame arrives it is snapped to the nearest polyline
+ *              segment (if available) so GPS jitter never drags the marker
+ *              off the road, then the deck.gl transition smooths it.
  *
  *   Fallback : If no WS update arrives within STALE_THRESHOLD_MS the hook
  *              switches to client-side interpolation along the decoded
@@ -47,10 +48,53 @@ function positionOnPolyline(polyline: GeoPoint[], t: number): GeoPoint {
   return { lat: lerp(a.lat, b.lat, frac), lng: lerp(a.lng, b.lng, frac) };
 }
 
+/**
+ * Project a raw GPS point onto the nearest segment of the route polyline.
+ * This keeps the ambulance marker on the road even when the raw GPS signal
+ * drifts slightly off to the side (common with phone/hardware GPS noise).
+ *
+ * Uses a 2-D perpendicular-distance projection in lat/lng space. Precision
+ * is sufficient for sub-50m snapping at Bangalore latitudes.
+ */
+function snapToPolyline(raw: GeoPoint, polyline: GeoPoint[]): GeoPoint {
+  if (polyline.length < 2) return raw;
+
+  let bestDist = Infinity;
+  let bestPt: GeoPoint = raw;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const a = polyline[i];
+    const b = polyline[i + 1];
+
+    const abLat  = b.lat - a.lat;
+    const abLng  = b.lng - a.lng;
+    const abLen2 = abLat * abLat + abLng * abLng;
+
+    if (abLen2 === 0) continue; // degenerate zero-length segment
+
+    // Scalar projection of (raw - a) onto AB, clamped to segment [0, 1]
+    const t = Math.max(0, Math.min(1,
+      ((raw.lat - a.lat) * abLat + (raw.lng - a.lng) * abLng) / abLen2,
+    ));
+
+    const proj: GeoPoint = { lat: a.lat + t * abLat, lng: a.lng + t * abLng };
+    const dLat = raw.lat - proj.lat;
+    const dLng = raw.lng - proj.lng;
+    const dist = dLat * dLat + dLng * dLng;
+
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestPt   = proj;
+    }
+  }
+
+  return bestPt;
+}
+
 export interface AmbulanceAnimState {
   lat: number;
   lng: number;
-  /** true = live GPS, false = interpolated */
+  /** true = live GPS (snapped to road), false = polyline-interpolated */
   isLive: boolean;
 }
 
@@ -78,12 +122,15 @@ export function useAmbulanceAnimation(
     isLive: false,
   }));
 
-  // When the WS position updates, record the time and snap.
+  // When the WS position updates, snap it to the route polyline (if loaded)
+  // then record the time and update state.
   useEffect(() => {
     if (wsLat === null || wsLng === null) return;
     lastWsUpdateRef.current = Date.now();
-    setState({ lat: wsLat, lng: wsLng, isLive: true });
-  }, [wsLat, wsLng]);
+    const raw: GeoPoint = { lat: wsLat, lng: wsLng };
+    const snapped = polyline.length >= 2 ? snapToPolyline(raw, polyline) : raw;
+    setState({ lat: snapped.lat, lng: snapped.lng, isLive: true });
+  }, [wsLat, wsLng, polyline]);
 
   // Tick: if WS data has gone stale, interpolate along the polyline.
   useEffect(() => {
@@ -92,8 +139,8 @@ export function useAmbulanceAnimation(
     const effectiveEta = Math.max(MIN_ETA_SECONDS, etaSeconds);
 
     const id = setInterval(() => {
-      const now  = Date.now();
-      const age  = now - lastWsUpdateRef.current;
+      const now = Date.now();
+      const age = now - lastWsUpdateRef.current;
       if (age < STALE_THRESHOLD_MS) return; // WS is fresh — leave it alone
 
       // Use startedAt if available, otherwise assume we started at mount.

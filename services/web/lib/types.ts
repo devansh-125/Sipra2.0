@@ -84,6 +84,10 @@ export interface FleetVehicle {
   lng: number;
   evading: boolean;
   reroute_status?: RerouteState | null;
+  /** Compass bearing (0 = north, 90 = east, …). Undefined until first tick. */
+  heading_deg?: number;
+  /** Which predefined road polyline this vehicle is crawling along. */
+  route_id?: string;
 }
 
 export interface RerouteStatusPayload {

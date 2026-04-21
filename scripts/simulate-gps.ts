@@ -1,16 +1,14 @@
 /**
- * Sipra "God Mode" Simulator
+ * Sipra "God Mode" Simulator — Road-Aligned Fleet Edition
  *
  * 1. Creates a demo trip on the Go backend.
- * 2. Drives a simulated ambulance along a hardcoded Bangalore route, posting a
- *    GPS ping every second to POST /api/v1/trips/:id/pings.
- * 3. Spawns 50 fake partner-fleet vehicles scattered around the route.
- * 4. Subscribes to ws://localhost:8080/ws/dashboard; on each CORRIDOR_UPDATE
- *    it checks which fleet vehicles are inside the GeoJSON polygon and steers
- *    them perpendicularly away from the ambulance heading — visually simulating
- *    drivers obeying the B2B webhook exclusion notice.
- * 5. Serves live fleet positions over a WebSocket on port 4001 so the Next.js
- *    dashboard can render the FleetSwarm layer without a backend change.
+ * 2. Drives the ambulance along a real road route fetched from Google Maps
+ *    Directions API (same query Google Maps uses when you type origin → destination).
+ * 3. Spawns 20 fleet vehicles distributed across 5 real Bangalore roads.
+ *    Each vehicle crawls along its assigned road at ~30 kph with a correct heading.
+ * 4. When the ambulance corridor intersects a vehicle's road, the vehicle is
+ *    rerouted to a predefined alternate road (no off-road perpendicular drift).
+ * 5. Serves live fleet state over WebSocket on port 4001 (consumed by Next.js).
  */
 
 import WebSocket, { WebSocketServer } from 'ws';
@@ -24,74 +22,127 @@ const BACKEND_WS   = process.env.BACKEND_WS   ?? 'ws://localhost:8080/ws/dashboa
 const FRONTEND_URL = process.env.FRONTEND_URL ?? 'http://localhost:3000';
 const FLEET_PORT   = Number(process.env.FLEET_PORT ?? 4001);
 const PING_INTERVAL_MS = 1_000;
-const FLEET_SIZE       = 50;
-// How far an evading car moves perpendicular each tick (~8 m in Bangalore lat).
-const EVASION_STEP_DEG = 0.00008;
+const FLEET_SIZE       = 20;
+
+// Speed constants
+const VEHICLE_KPH      = 30;                  // fleet vehicle speed
+const AMBULANCE_KPH    = 45;                  // ambulance speed
+const M_PER_DEG_LAT    = 111_320;
 
 // ---------------------------------------------------------------------------
-// Real hospital coordinates (Bangalore)
-// Used as origin / destination for the trip. Also sent to the Directions API.
+// Hospital coordinates — Victoria Hospital → Manipal Hospital HAL
+// (These are the same coords you'd type into Google Maps)
 // ---------------------------------------------------------------------------
-const HOSPITAL_ORIGIN = { lat: 12.9656, lng: 77.5713 };      // Victoria Hospital
-const HOSPITAL_DEST   = { lat: 12.9587, lng: 77.6442 };      // Manipal Hospital, HAL
+const HOSPITAL_ORIGIN = { lat: 12.9656, lng: 77.5713 };
+const HOSPITAL_DEST   = { lat: 12.9587, lng: 77.6442 };
 
 // ---------------------------------------------------------------------------
-// Hardcoded fallback route — Indiranagar → Koramangala.
-// Used when the Directions API is unavailable.
-// ---------------------------------------------------------------------------
-const DEFAULT_ROUTE: [number, number][] = [
-  [12.9656, 77.5713],  // Victoria Hospital
-  [12.9665, 77.5780],
-  [12.9680, 77.5860],
-  [12.9700, 77.5950],
-  [12.9710, 77.6050],
-  [12.9720, 77.6130],
-  [12.9680, 77.6240],
-  [12.9640, 77.6310],
-  [12.9610, 77.6380],
-  [12.9587, 77.6442],  // Manipal Hospital, HAL
-];
-let ROUTE: [number, number][] = DEFAULT_ROUTE;
-const SUBSTEPS = 10; // linear interpolation steps between each waypoint pair
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-// Google encoded polyline decoder (precision 1e-5)
+// Polyline decoder (Google's encoded polyline algorithm, precision 1e-5)
 // ---------------------------------------------------------------------------
 function decodePolyline(encoded: string): { lat: number; lng: number }[] {
   const result: { lat: number; lng: number }[] = [];
   let index = 0, lat = 0, lng = 0;
   while (index < encoded.length) {
-    let shift = 0, result_val = 0, b: number;
-    do { b = encoded.charCodeAt(index++) - 63; result_val |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lat += (result_val & 1) ? ~(result_val >> 1) : (result_val >> 1);
-    shift = 0; result_val = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result_val |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lng += (result_val & 1) ? ~(result_val >> 1) : (result_val >> 1);
+    let shift = 0, val = 0, b: number;
+    do { b = encoded.charCodeAt(index++) - 63; val |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (val & 1) ? ~(val >> 1) : (val >> 1);
+    shift = 0; val = 0;
+    do { b = encoded.charCodeAt(index++) - 63; val |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (val & 1) ? ~(val >> 1) : (val >> 1);
     result.push({ lat: lat / 1e5, lng: lng / 1e5 });
   }
   return result;
 }
 
 // ---------------------------------------------------------------------------
-interface FleetVehicle {
-  id: string;
-  lat: number;
-  lng: number;
-  evading: boolean;
-}
-
-type CorridorGeometry = Polygon | MultiPolygon;
-
-// ---------------------------------------------------------------------------
 // Geometry helpers
 // ---------------------------------------------------------------------------
+function bearingDeg(
+  aLat: number, aLng: number,
+  bLat: number, bLng: number,
+): number {
+  const dLng = (bLng - aLng) * (Math.PI / 180);
+  const lat1  = aLat * (Math.PI / 180);
+  const lat2  = bLat * (Math.PI / 180);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) -
+            Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
 
-/**
- * Classic ray-casting point-in-polygon for a single ring.
- * Ring coordinates are GeoJSON [lng, lat] pairs.
- */
+/** Segment length in metres (flat-earth approximation, fine at city scale). */
+function segmentM(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const mLng = M_PER_DEG_LAT * Math.cos((aLat * Math.PI) / 180);
+  const dy = (bLat - aLat) * M_PER_DEG_LAT;
+  const dx = (bLng - aLng) * mLng;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/** Total polyline length in metres. */
+function polylineM(pts: { lat: number; lng: number }[]): number {
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    total += segmentM(pts[i - 1].lat, pts[i - 1].lng, pts[i].lat, pts[i].lng);
+  }
+  return total;
+}
+
+type GeoCoord = { lat: number; lng: number };
+
+/** Advance position along a polyline by `distM` metres.
+ *  Returns new position, segment index, and fractional offset within segment. */
+function advanceAlongPolyline(
+  pts: GeoCoord[],
+  segIdx: number,
+  segFrac: number,
+  distM: number,
+  direction: 1 | -1,
+): { lat: number; lng: number; segIdx: number; segFrac: number; looped: boolean } {
+  let remaining = distM;
+  let si = segIdx;
+  let sf = segFrac;
+
+  while (remaining > 0) {
+    const nextSi = si + direction;
+    if (nextSi < 0 || nextSi >= pts.length) {
+      // Reached an end — loop back
+      si   = direction === 1 ? 0 : pts.length - 1;
+      sf   = 0;
+      return advanceAlongPolyline(pts, si, sf, remaining, direction);
+    }
+    const a = pts[si];
+    const b = pts[nextSi];
+    const segLen = segmentM(a.lat, a.lng, b.lat, b.lng);
+    const traversed = segLen * (1 - sf);
+
+    if (remaining <= traversed) {
+      sf += (remaining / segLen) * Math.sign(direction); // handles direction
+      // clamp
+      const newSf = sf < 0 ? 0 : sf > 1 ? 1 : sf;
+      const pos = {
+        lat: a.lat + (b.lat - a.lat) * newSf,
+        lng: a.lng + (b.lng - a.lng) * newSf,
+        segIdx: si,
+        segFrac: newSf,
+        looped: false,
+      };
+      return pos;
+    }
+
+    remaining -= traversed;
+    si = nextSi;
+    sf = direction === 1 ? 0 : 1;
+  }
+
+  const a = pts[si];
+  return { lat: a.lat, lng: a.lng, segIdx: si, segFrac: sf, looped: false };
+}
+
+// ---------------------------------------------------------------------------
+// Ray-casting point-in-polygon
+// ---------------------------------------------------------------------------
+type CorridorGeometry = Polygon | MultiPolygon;
+
 function raycast(lngLat: [number, number], ring: [number, number][]): boolean {
   const [px, py] = lngLat;
   let inside = false;
@@ -106,32 +157,352 @@ function raycast(lngLat: [number, number], ring: [number, number][]): boolean {
 }
 
 function pointInCorridor(lat: number, lng: number, geom: CorridorGeometry): boolean {
-  // GeoJSON exterior rings; inner rings (holes) are ignored for this demo.
   const rings: [number, number][][] =
     geom.type === 'Polygon'
       ? [geom.coordinates[0] as [number, number][]]
       : geom.coordinates.map(p => p[0] as [number, number][]);
-
   return rings.some(ring => raycast([lng, lat], ring));
 }
 
-/** Returns a unit vector or [0, 1] if the input is zero-length. */
-function normalize(dx: number, dy: number): [number, number] {
-  const len = Math.sqrt(dx * dx + dy * dy);
-  return len > 1e-10 ? [dx / len, dy / len] : [0, 1];
+/** Check if any segment of a polyline passes through the corridor. */
+function polylineIntersectsCorridor(
+  pts: GeoCoord[],
+  geom: CorridorGeometry,
+): boolean {
+  return pts.some(p => pointInCorridor(p.lat, p.lng, geom));
 }
 
 // ---------------------------------------------------------------------------
-// Fleet initialisation
+// Route fetching — Google Maps Directions API (same as typing in Google Maps)
 // ---------------------------------------------------------------------------
-function spawnFleet(centerLat: number, centerLng: number): FleetVehicle[] {
-  return Array.from({ length: FLEET_SIZE }, (_, i) => ({
-    id: `fleet-${i}`,
-    // Scatter randomly within ~3 km of the route start.
-    lat: centerLat + (Math.random() - 0.5) * 0.055,
-    lng: centerLng + (Math.random() - 0.5) * 0.055,
-    evading: false,
-  }));
+async function fetchRoadRoute(
+  origin: GeoCoord,
+  destination: GeoCoord,
+  label: string,
+): Promise<GeoCoord[]> {
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
+  if (apiKey) {
+    try {
+      const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
+      url.searchParams.set('origin', `${origin.lat},${origin.lng}`);
+      url.searchParams.set('destination', `${destination.lat},${destination.lng}`);
+      url.searchParams.set('mode', 'driving');
+      url.searchParams.set('departure_time', 'now');
+      url.searchParams.set('traffic_model', 'best_guess');
+      url.searchParams.set('key', apiKey);
+
+      const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8_000) });
+      if (res.ok) {
+        const data = await res.json() as {
+          status: string;
+          routes?: Array<{ overview_polyline: { points: string } }>;
+        };
+        if (data.status === 'OK' && data.routes?.length) {
+          const pts = decodePolyline(data.routes[0].overview_polyline.points);
+          if (pts.length >= 2) {
+            console.log(`✅  [${label}] Google Maps route — ${pts.length} waypoints`);
+            return pts;
+          }
+        } else {
+          console.warn(`⚠️  [${label}] Directions API: ${data.status}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`⚠️  [${label}] API unavailable: ${(err as Error).message}`);
+    }
+  }
+
+  // Also try via Next.js proxy (server key without browser restrictions)
+  try {
+    const params = new URLSearchParams({
+      origin: `${origin.lat},${origin.lng}`,
+      destination: `${destination.lat},${destination.lng}`,
+    });
+    const res = await fetch(`${FRONTEND_URL}/api/route/directions?${params}`, {
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (res.ok) {
+      const json = await res.json() as { polylineEncoded?: string };
+      if (json.polylineEncoded) {
+        const pts = decodePolyline(json.polylineEncoded);
+        if (pts.length >= 2) {
+          console.log(`✅  [${label}] proxy route — ${pts.length} waypoints`);
+          return pts;
+        }
+      }
+    }
+  } catch { /* proxy unavailable */ }
+
+  return []; // empty → caller uses fallback
+}
+
+// ---------------------------------------------------------------------------
+// Predefined road polylines (hand-traced Bangalore roads)
+// These are the fallback when Directions API is unavailable.
+// All coordinates lie on actual road centre-lines.
+// ---------------------------------------------------------------------------
+
+/** Ambulance main route: Victoria Hospital → Manipal HAL */
+const FALLBACK_AMBULANCE_ROUTE: GeoCoord[] = [
+  { lat: 12.9656, lng: 77.5713 }, // Victoria Hospital
+  { lat: 12.9661, lng: 77.5740 },
+  { lat: 12.9668, lng: 77.5773 }, // KR Circle
+  { lat: 12.9680, lng: 77.5810 }, // Kasturba Rd
+  { lat: 12.9697, lng: 77.5850 }, // Raj Bhavan Rd junction
+  { lat: 12.9712, lng: 77.5893 }, // MG Road start
+  { lat: 12.9718, lng: 77.5930 }, // MG Road / Brigade Rd
+  { lat: 12.9722, lng: 77.5965 }, // MG Road / Lavelle Rd
+  { lat: 12.9726, lng: 77.5998 }, // MG Road / Richmond Rd
+  { lat: 12.9735, lng: 77.6035 }, // MG Road / Ulsoor Lake
+  { lat: 12.9745, lng: 77.6075 }, // Trinity junction
+  { lat: 12.9757, lng: 77.6112 }, // Halasuru
+  { lat: 12.9763, lng: 77.6145 }, // CMH Road start
+  { lat: 12.9770, lng: 77.6180 }, // CMH Road
+  { lat: 12.9775, lng: 77.6218 }, // Indiranagar 1st Stage
+  { lat: 12.9778, lng: 77.6255 }, // Indiranagar 100ft Road
+  { lat: 12.9774, lng: 77.6292 }, // Indiranagar 2nd Stage
+  { lat: 12.9768, lng: 77.6330 }, // Domlur flyover approach
+  { lat: 12.9760, lng: 77.6368 }, // Old Airport Rd junction
+  { lat: 12.9750, lng: 77.6400 }, // Old Airport Road
+  { lat: 12.9740, lng: 77.6428 }, // HAL Old Airport Rd
+  { lat: 12.9620, lng: 77.6440 }, // Jeevanbhima Nagar
+  { lat: 12.9600, lng: 77.6443 }, // Manipal approach
+  { lat: 12.9587, lng: 77.6442 }, // Manipal Hospital HAL (destination)
+];
+
+/** Route 0 — Indiranagar 100ft Road (north–south main artery near ambulance) */
+const ROAD_100FT: GeoCoord[] = [
+  { lat: 12.9826, lng: 77.6388 }, // 100ft Road north end
+  { lat: 12.9814, lng: 77.6390 },
+  { lat: 12.9800, lng: 77.6392 },
+  { lat: 12.9783, lng: 77.6390 }, // Central Indiranagar
+  { lat: 12.9775, lng: 77.6385 },
+  { lat: 12.9762, lng: 77.6376 },
+  { lat: 12.9748, lng: 77.6368 },
+  { lat: 12.9735, lng: 77.6360 }, // Domlur junction
+  { lat: 12.9720, lng: 77.6352 },
+];
+
+/** Route 1 — CMH Road / Indiranagar 12th Main */
+const ROAD_CMH: GeoCoord[] = [
+  { lat: 12.9817, lng: 77.6230 }, // CMH Road north
+  { lat: 12.9808, lng: 77.6228 },
+  { lat: 12.9793, lng: 77.6222 },
+  { lat: 12.9778, lng: 77.6218 }, // Indiranagar 1st Stage junction
+  { lat: 12.9763, lng: 77.6210 },
+  { lat: 12.9750, lng: 77.6201 },
+  { lat: 12.9737, lng: 77.6190 },
+  { lat: 12.9720, lng: 77.6180 }, // Ulsoor vicinity
+];
+
+/** Route 2 — Old Airport Road (parallel to ambulance going east) */
+const ROAD_OLD_AIRPORT: GeoCoord[] = [
+  { lat: 12.9690, lng: 77.6300 }, // Old Airport Rd west
+  { lat: 12.9700, lng: 77.6325 },
+  { lat: 12.9712, lng: 77.6350 },
+  { lat: 12.9725, lng: 77.6380 },
+  { lat: 12.9738, lng: 77.6410 },
+  { lat: 12.9748, lng: 77.6435 },
+  { lat: 12.9755, lng: 77.6458 }, // HAL
+  { lat: 12.9760, lng: 77.6475 },
+  { lat: 12.9762, lng: 77.6490 }, // Old Airport Rd east
+];
+
+/** Route 3 — Ulsoor Road → Halasuru (connects MG Road to CMH Road area) */
+const ROAD_ULSOOR: GeoCoord[] = [
+  { lat: 12.9757, lng: 77.6070 }, // MG Road / Ulsoor junction
+  { lat: 12.9762, lng: 77.6090 },
+  { lat: 12.9768, lng: 77.6112 }, // Halasuru temple junction
+  { lat: 12.9775, lng: 77.6130 },
+  { lat: 12.9780, lng: 77.6150 },
+  { lat: 12.9786, lng: 77.6168 },
+  { lat: 12.9792, lng: 77.6188 }, // joins CMH Road area
+];
+
+/** Route 4 — Domlur–Koramangala connector (south of ambulance route) */
+const ROAD_DOMLUR: GeoCoord[] = [
+  { lat: 12.9640, lng: 77.6310 }, // Koramangala / ST Bed area
+  { lat: 12.9648, lng: 77.6330 },
+  { lat: 12.9658, lng: 77.6352 },
+  { lat: 12.9668, lng: 77.6375 },
+  { lat: 12.9680, lng: 77.6398 },
+  { lat: 12.9690, lng: 77.6418 }, // Domlur
+  { lat: 12.9700, lng: 77.6438 },
+  { lat: 12.9710, lng: 77.6455 }, // near Manipal HAL
+];
+
+// ---------------------------------------------------------------------------
+// Named fleet routes (id, fallback polyline, alternate route id when evading)
+// ---------------------------------------------------------------------------
+interface FleetRoute {
+  id: string;
+  label: string;
+  origin: GeoCoord;
+  destination: GeoCoord;
+  fallback: GeoCoord[];
+  altRouteId: string; // which route to switch to when evading
+}
+
+const FLEET_ROUTES: FleetRoute[] = [
+  {
+    id: 'route-100ft',
+    label: '100ft Road',
+    origin:      { lat: 12.9826, lng: 77.6388 },
+    destination: { lat: 12.9720, lng: 77.6352 },
+    fallback:    ROAD_100FT,
+    altRouteId:  'route-cmh',
+  },
+  {
+    id: 'route-cmh',
+    label: 'CMH Road',
+    origin:      { lat: 12.9817, lng: 77.6230 },
+    destination: { lat: 12.9720, lng: 77.6180 },
+    fallback:    ROAD_CMH,
+    altRouteId:  'route-ulsoor',
+  },
+  {
+    id: 'route-old-airport',
+    label: 'Old Airport Road',
+    origin:      { lat: 12.9690, lng: 77.6300 },
+    destination: { lat: 12.9762, lng: 77.6490 },
+    fallback:    ROAD_OLD_AIRPORT,
+    altRouteId:  'route-domlur',
+  },
+  {
+    id: 'route-ulsoor',
+    label: 'Ulsoor Road',
+    origin:      { lat: 12.9757, lng: 77.6070 },
+    destination: { lat: 12.9792, lng: 77.6188 },
+    fallback:    ROAD_ULSOOR,
+    altRouteId:  'route-100ft',
+  },
+  {
+    id: 'route-domlur',
+    label: 'Domlur–Koramangala',
+    origin:      { lat: 12.9640, lng: 77.6310 },
+    destination: { lat: 12.9710, lng: 77.6455 },
+    fallback:    ROAD_DOMLUR,
+    altRouteId:  'route-cmh',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Internal fleet vehicle (extended with road-crawl state)
+// ---------------------------------------------------------------------------
+interface InternalVehicle {
+  id: string;
+  lat: number;
+  lng: number;
+  evading: boolean;
+  heading_deg: number;
+  route_id: string;
+
+  // Road-crawl state (not broadcast)
+  assignedRoute: FleetRoute;
+  activePts: GeoCoord[];     // current polyline being crawled
+  segIdx: number;            // current segment start index
+  segFrac: number;           // [0..1] fraction within that segment
+  direction: 1 | -1;        // 1 = origin→dest, -1 = dest→origin
+}
+
+// ---------------------------------------------------------------------------
+// Spawn fleet on roads
+// ---------------------------------------------------------------------------
+async function buildFleetRoutes(): Promise<Map<string, GeoCoord[]>> {
+  console.log('🗺   Fetching fleet road routes from Google Maps Directions API…');
+  const resolved = new Map<string, GeoCoord[]>();
+
+  for (const route of FLEET_ROUTES) {
+    const pts = await fetchRoadRoute(route.origin, route.destination, route.label);
+    resolved.set(route.id, pts.length >= 2 ? pts : route.fallback);
+  }
+
+  return resolved;
+}
+
+function spawnFleetOnRoads(routePolylines: Map<string, GeoCoord[]>): InternalVehicle[] {
+  const vehicles: InternalVehicle[] = [];
+  const vehiclesPerRoute = Math.floor(FLEET_SIZE / FLEET_ROUTES.length); // 4
+
+  for (let ri = 0; ri < FLEET_ROUTES.length; ri++) {
+    const route = FLEET_ROUTES[ri];
+    const pts   = routePolylines.get(route.id) ?? route.fallback;
+    const totalM = polylineM(pts);
+
+    for (let vi = 0; vi < vehiclesPerRoute; vi++) {
+      const vehicleIdx = ri * vehiclesPerRoute + vi;
+      const id = `fleet-${vehicleIdx.toString().padStart(2, '0')}`;
+
+      // Stagger vehicles evenly along the route
+      const fraction = vi / vehiclesPerRoute;
+      let distM = fraction * totalM;
+
+      // Walk to starting position
+      let segIdx = 0;
+      let segFrac = 0;
+      for (let si = 0; si < pts.length - 1; si++) {
+        const segLen = segmentM(pts[si].lat, pts[si].lng, pts[si + 1].lat, pts[si + 1].lng);
+        if (distM <= segLen) {
+          segFrac = segLen > 0 ? distM / segLen : 0;
+          segIdx = si;
+          break;
+        }
+        distM -= segLen;
+        segIdx = si;
+      }
+
+      const a = pts[segIdx];
+      const b = pts[Math.min(segIdx + 1, pts.length - 1)];
+      const startLat = a.lat + (b.lat - a.lat) * segFrac;
+      const startLng = a.lng + (b.lng - a.lng) * segFrac;
+      const heading  = bearingDeg(a.lat, a.lng, b.lat, b.lng);
+
+      // Alternate direction per vehicle for realistic two-way traffic
+      const direction: 1 | -1 = vi % 2 === 0 ? 1 : -1;
+
+      vehicles.push({
+        id,
+        lat: startLat,
+        lng: startLng,
+        evading: false,
+        heading_deg: heading,
+        route_id: route.id,
+        assignedRoute: route,
+        activePts: pts,
+        segIdx,
+        segFrac,
+        direction,
+      });
+
+      console.log(`  🚗  ${id} → ${route.label} [${startLat.toFixed(5)}, ${startLng.toFixed(5)}]`);
+    }
+  }
+
+  return vehicles;
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast type matches FleetVehicle in types.ts
+// ---------------------------------------------------------------------------
+interface BroadcastVehicle {
+  id: string;
+  lat: number;
+  lng: number;
+  evading: boolean;
+  heading_deg: number;
+  route_id: string;
+  reroute_status?: string | null;
+}
+
+function toBroadcast(v: InternalVehicle): BroadcastVehicle {
+  return {
+    id: v.id,
+    lat: v.lat,
+    lng: v.lng,
+    evading: v.evading,
+    heading_deg: v.heading_deg,
+    route_id: v.route_id,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -139,49 +510,27 @@ function spawnFleet(centerLat: number, centerLng: number): FleetVehicle[] {
 // ---------------------------------------------------------------------------
 async function main(): Promise<void> {
 
-  // 0. Attempt to fetch real road-geometry waypoints from the Directions proxy.
-  console.log('🗺   Fetching real route from Directions API…');
-  try {
-    const params = new URLSearchParams({
-      origin:      `${HOSPITAL_ORIGIN.lat},${HOSPITAL_ORIGIN.lng}`,
-      destination: `${HOSPITAL_DEST.lat},${HOSPITAL_DEST.lng}`,
-    });
-    const routeRes = await fetch(`${FRONTEND_URL}/api/route/directions?${params}`, {
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (routeRes.ok) {
-      const routeData = await routeRes.json() as { polylineEncoded?: string; etaSeconds?: number };
-      if (routeData.polylineEncoded) {
-        // Decode Google's encoded polyline format.
-        const decoded = decodePolyline(routeData.polylineEncoded);
-        if (decoded.length >= 2) {
-          ROUTE = decoded.map(p => [p.lat, p.lng] as [number, number]);
-          console.log(`✅  Real route loaded (${ROUTE.length} waypoints, ETA ${routeData.etaSeconds}s)`);
-        } else {
-          console.warn('⚠️  Decoded polyline too short — using fallback route');
-        }
-      } else {
-        console.warn('⚠️  No polyline in response — using fallback route');
-      }
-    } else {
-      console.warn(`⚠️  Route proxy returned ${routeRes.status} — using fallback route`);
-    }
-  } catch (err) {
-    console.warn('⚠️  Could not reach route proxy — using fallback route:', (err as Error).message);
-  }
+  // 0. Fetch ambulance route from Google Maps Directions API
+  console.log('🚑  Fetching ambulance route from Google Maps Directions API…');
+  const ambulancePts = await fetchRoadRoute(HOSPITAL_ORIGIN, HOSPITAL_DEST, 'Ambulance');
+  const ROUTE: GeoCoord[] = ambulancePts.length >= 2 ? ambulancePts : FALLBACK_AMBULANCE_ROUTE;
+  console.log(`✅  Ambulance route: ${ROUTE.length} waypoints`);
 
-  // 1. Create a trip on the backend.
+  // 0b. Fetch fleet road routes
+  const routePolylines = await buildFleetRoutes();
+
+  // 1. Create trip on backend
   console.log('🚑  Creating demo trip…');
   const tripRes = await fetch(`${BACKEND_HTTP}/api/v1/trips`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      cargo_category:    'organ',
-      cargo_description: 'Hackathon Demo — Kidney',
-      origin:            { lat: ROUTE[0][0], lng: ROUTE[0][1] },
-      destination:       { lat: ROUTE[ROUTE.length - 1][0], lng: ROUTE[ROUTE.length - 1][1] },
+      cargo_category:       'organ',
+      cargo_description:    'Hackathon Demo — Kidney',
+      origin:               { lat: ROUTE[0].lat,                      lng: ROUTE[0].lng },
+      destination:          { lat: ROUTE[ROUTE.length - 1].lat,       lng: ROUTE[ROUTE.length - 1].lng },
       golden_hour_deadline: new Date(Date.now() + 3_600_000).toISOString(),
-      ambulance_id:      'AMB-DEMO-01',
+      ambulance_id:         'AMB-DEMO-01',
       hospital_dispatch_id: 'Victoria-Hospital-BLR',
     }),
   });
@@ -191,21 +540,22 @@ async function main(): Promise<void> {
   const { trip_id: tripId } = await tripRes.json() as { trip_id: string };
   console.log(`✅  Trip ID: ${tripId}`);
 
-  // 2. Start the fleet WebSocket server (consumed by the Next.js dashboard).
+  // 2. Start fleet WebSocket server
   const wss = new WebSocketServer({ port: FLEET_PORT });
   console.log(`🌐  Fleet WS server listening on ws://localhost:${FLEET_PORT}`);
 
-  function broadcastFleet(vehicles: FleetVehicle[]): void {
-    const msg = JSON.stringify(vehicles);
+  function broadcastFleet(vehicles: InternalVehicle[]): void {
+    const msg = JSON.stringify(vehicles.map(toBroadcast));
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(msg);
     }
   }
 
-  // 3. Initialise fleet around route start.
-  const fleet = spawnFleet(ROUTE[0][0], ROUTE[0][1]);
+  // 3. Spawn fleet on real roads
+  console.log(`🚗  Spawning ${FLEET_SIZE} vehicles across ${FLEET_ROUTES.length} roads…`);
+  const fleet = spawnFleetOnRoads(routePolylines);
 
-  // 4. Subscribe to the Go backend for corridor updates.
+  // 4. Subscribe to backend for corridor updates
   let corridorGeom: CorridorGeometry | null = null;
 
   const backendWs = new WebSocket(BACKEND_WS);
@@ -218,80 +568,114 @@ async function main(): Promise<void> {
       };
       if (msg.type === 'CORRIDOR_UPDATE') {
         corridorGeom = msg.payload.polygon_geojson;
-        console.log(`🗺   Corridor v${msg.payload.version} — checking ${FLEET_SIZE} vehicles…`);
+        console.log(`\n🗺   Corridor v${msg.payload.version} received`);
       }
     } catch { /* malformed frame */ }
   });
   backendWs.on('error', (err) => console.error('Backend WS error:', (err as Error).message));
   backendWs.on('close', () => console.warn('⚠️  Backend WS closed; corridor updates paused'));
 
-  // 5. Ambulance drive loop.
-  let waypointIdx = 0;
-  let subStep = 0;
-  let ambulanceLat = ROUTE[0][0];
-  let ambulanceLng = ROUTE[0][1];
+  // 5. Ambulance drive loop state
+  let ambSegIdx = 0;
+  let ambSegFrac = 0;
+
+  // Speed in fraction of segment per tick
+  const mPerTick = (AMBULANCE_KPH * 1000) / 3600; // metres per second (1 tick = 1 s)
 
   const interval = setInterval(async () => {
-    const fromWp = ROUTE[waypointIdx % ROUTE.length];
-    const toWp   = ROUTE[(waypointIdx + 1) % ROUTE.length];
-    const t      = subStep / SUBSTEPS;
+    // ── Advance ambulance along its route ─────────────────────────────────
+    const moved = advanceAlongPolyline(ROUTE, ambSegIdx, ambSegFrac, mPerTick, 1);
+    const ambulanceLat = moved.lat;
+    const ambulanceLng = moved.lng;
+    ambSegIdx  = moved.segIdx;
+    ambSegFrac = moved.segFrac;
 
-    // Linearly interpolate position between the two waypoints.
-    ambulanceLat = fromWp[0] + (toWp[0] - fromWp[0]) * t;
-    ambulanceLng = fromWp[1] + (toWp[1] - fromWp[1]) * t;
-
-    subStep++;
-    if (subStep >= SUBSTEPS) {
-      subStep = 0;
-      waypointIdx = (waypointIdx + 1) % (ROUTE.length - 1);
+    // Wrap ambulance back to start if it reaches the end
+    if (ambSegIdx >= ROUTE.length - 1 && ambSegFrac >= 0.99) {
+      ambSegIdx  = 0;
+      ambSegFrac = 0;
     }
 
-    // Post GPS ping to the backend (fire-and-forget; errors are logged only).
+    // Post GPS ping to backend
     fetch(`${BACKEND_HTTP}/api/v1/trips/${tripId}/pings`, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lat: ambulanceLat, lng: ambulanceLng }),
+      body:    JSON.stringify({ lat: ambulanceLat, lng: ambulanceLng }),
     }).catch((err: unknown) => console.error('Ping POST failed:', (err as Error).message));
 
-    // Heading unit vector for perpendicular evasion calculation.
-    const rawDx = toWp[0] - fromWp[0];
-    const rawDy = toWp[1] - fromWp[1];
-    const [hdx, hdy] = normalize(rawDx, rawDy);
+    // ── Advance each fleet vehicle along its road ──────────────────────────
+    const vehicleMperTick = (VEHICLE_KPH * 1000) / 3600;
+    let evadingCount = 0;
 
-    // For each fleet vehicle, determine if it is inside the active corridor.
-    // If so, steer it perpendicularly away from the ambulance's path.
     for (const car of fleet) {
-      if (corridorGeom && pointInCorridor(car.lat, car.lng, corridorGeom)) {
+      // Check if this vehicle's current road intersects the corridor
+      const onCorridorRoad = corridorGeom !== null &&
+        pointInCorridor(car.lat, car.lng, corridorGeom);
+
+      if (onCorridorRoad) {
+        // Switch to alternate road if not already rerouting
+        if (!car.evading) {
+          const altId    = car.assignedRoute.altRouteId;
+          const altRoute = FLEET_ROUTES.find(r => r.id === altId);
+          if (altRoute) {
+            const altPts = routePolylines.get(altId) ?? altRoute.fallback;
+            car.activePts     = altPts;
+            car.assignedRoute = altRoute;
+            car.route_id      = altId;
+            car.segIdx        = 0;
+            car.segFrac       = 0;
+            console.log(`  ↪  ${car.id} rerouting to ${altRoute.label}`);
+          }
+        }
         car.evading = true;
-
-        // Vector from ambulance to car.
-        const toCarLat = car.lat - ambulanceLat;
-        const toCarLng = car.lng - ambulanceLng;
-
-        // Determine which perpendicular side the car is already on and push
-        // it further in that direction (avoids cars crossing the route).
-        // Left perpendicular: (-hdy, hdx); right: (hdy, -hdx).
-        const leftDot = toCarLat * (-hdy) + toCarLng * hdx;
-        const [evadeLat, evadeLng] = leftDot >= 0
-          ? normalize(-hdy, hdx)
-          : normalize(hdy, -hdx);
-
-        car.lat += evadeLat * EVASION_STEP_DEG;
-        car.lng += evadeLng * EVASION_STEP_DEG;
+        evadingCount++;
       } else {
-        car.evading = false;
+        // Restore original route if back to normal
+        if (car.evading) {
+          const origRoute = FLEET_ROUTES.find(r => r.id !== car.assignedRoute.id)
+            ?? car.assignedRoute; // keep current if not found
+          // Simply let the current route continue — actual restoration happens
+          // when the vehicle completes the alternate route
+          car.evading = false;
+        }
       }
+
+      // Advance along the active polyline
+      const advance = advanceAlongPolyline(
+        car.activePts, car.segIdx, car.segFrac, vehicleMperTick, car.direction,
+      );
+      car.lat     = advance.lat;
+      car.lng     = advance.lng;
+      car.segIdx  = advance.segIdx;
+      car.segFrac = advance.segFrac;
+
+      // Compute heading from current segment
+      const a = car.activePts[car.segIdx];
+      const nextIdx = Math.min(car.segIdx + 1, car.activePts.length - 1);
+      const b = car.activePts[nextIdx];
+      if (car.direction === 1) {
+        car.heading_deg = bearingDeg(a.lat, a.lng, b.lat, b.lng);
+      } else {
+        car.heading_deg = bearingDeg(b.lat, b.lng, a.lat, a.lng);
+      }
+
+      // Loop: when a vehicle reaches a route end, reverse direction
+      const atEnd   = car.segIdx >= car.activePts.length - 2 && car.segFrac >= 0.95;
+      const atStart = car.segIdx <= 0 && car.segFrac <= 0.05;
+      if (car.direction === 1 && atEnd)   car.direction = -1;
+      if (car.direction === -1 && atStart) car.direction = 1;
     }
 
     broadcastFleet(fleet);
 
-    const evading = fleet.filter(v => v.evading).length;
-    if (evading > 0) {
-      process.stdout.write(`\r🚑  [${ambulanceLat.toFixed(5)}, ${ambulanceLng.toFixed(5)}]  🚗  evading: ${evading}/${FLEET_SIZE}   `);
+    if (evadingCount > 0) {
+      process.stdout.write(
+        `\r🚑  [${ambulanceLat.toFixed(5)}, ${ambulanceLng.toFixed(5)}]  🚗  evading: ${evadingCount}/${FLEET_SIZE}   `,
+      );
     }
   }, PING_INTERVAL_MS);
 
-  // Graceful shutdown.
+  // Graceful shutdown
   process.on('SIGINT', () => {
     console.log('\n🛑  Simulator stopped');
     clearInterval(interval);

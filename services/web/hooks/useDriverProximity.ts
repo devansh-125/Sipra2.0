@@ -2,10 +2,20 @@ import { useMemo } from 'react';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import type { Geometry, MultiPolygon, Point, Polygon, Position } from 'geojson';
 
-export type ProximityState = 'NORMAL' | 'INSIDE_ZONE';
+/**
+ * Three proximity states:
+ *   NORMAL      — driver is safely outside the corridor (> warningBandM from edge)
+ *   WARNING     — driver is approaching the corridor (within warningBandM but not inside)
+ *   INSIDE_ZONE — driver is inside the corridor and must evacuate
+ */
+export type ProximityState = 'NORMAL' | 'WARNING' | 'INSIDE_ZONE';
 
 export interface DriverProximityResult {
   state: ProximityState;
+  /**
+   * Perpendicular distance in metres to the nearest corridor edge.
+   * null when no corridor geometry is available.
+   */
   distanceToEdgeM: number | null;
 }
 
@@ -13,6 +23,9 @@ interface LatLng {
   lat: number;
   lng: number;
 }
+
+// Default warning band: within 150 m of the corridor edge → WARNING state.
+export const DEFAULT_WARNING_BAND_M = 150;
 
 // Local ENU (equirectangular) projection — accurate within <10 km scale,
 // which is well within the 2 km corridor we're measuring against.
@@ -39,9 +52,17 @@ function pointToSegmentMeters(
   return Math.hypot(px - fx, py - fy);
 }
 
+/**
+ * Compute driver proximity to the emergency corridor.
+ *
+ * @param corridorGeoJSON  The corridor polygon (Polygon or MultiPolygon GeoJSON).
+ * @param position         Driver's current lat/lng.
+ * @param warningBandM     Distance threshold in metres for the WARNING state (default 150 m).
+ */
 export function useDriverProximity(
   corridorGeoJSON: Geometry | null,
   position: LatLng,
+  warningBandM: number = DEFAULT_WARNING_BAND_M,
 ): DriverProximityResult {
   return useMemo(() => {
     if (
@@ -68,6 +89,15 @@ export function useDriverProximity(
       }
     }
 
-    return { state: inside ? 'INSIDE_ZONE' : 'NORMAL', distanceToEdgeM: minDistM };
-  }, [corridorGeoJSON, position.lat, position.lng]);
+    if (inside) {
+      return { state: 'INSIDE_ZONE', distanceToEdgeM: minDistM };
+    }
+
+    // Outside — check if within the warning band.
+    if (minDistM !== null && minDistM <= warningBandM) {
+      return { state: 'WARNING', distanceToEdgeM: minDistM };
+    }
+
+    return { state: 'NORMAL', distanceToEdgeM: minDistM };
+  }, [corridorGeoJSON, position.lat, position.lng, warningBandM]);
 }

@@ -28,9 +28,11 @@ import {
 import { getTrip } from './api';
 import { useMissionRoute } from '../hooks/useMissionRoute';
 import { useSipraWebSocket } from '../hooks/useSipraWebSocket';
+import { useCorridorGeometry } from '../hooks/useCorridorGeometry';
 import type { GeoPoint, Trip, TripStatus } from './types';
 import type { RouteSource } from './routing';
 import { FALLBACK_ORIGIN, FALLBACK_DESTINATION } from './routing';
+import type { Polygon } from 'geojson';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -53,6 +55,14 @@ export interface MissionContextValue {
   polyline: GeoPoint[];
   etaSeconds: number;
   routeSource: RouteSource;
+
+  /**
+   * Road-aligned buffered corridor polygon derived from the route polyline.
+   * Uses a 75 m buffer on each side.  Null while the route is still loading.
+   * This is the canonical corridor shape shared by Mission Control, Driver POV,
+   * and the DriverShell mobile view.
+   */
+  corridorGeometry: Polygon | null;
 
   // Golden hour
   goldenHourMs: number;    // total window in ms
@@ -94,7 +104,7 @@ function calcUrgency(elapsed: number, total: number): UrgencyLevel {
 // Context
 // ---------------------------------------------------------------------------
 
-const MissionContext = createContext<MissionContextValue | null>(null);
+export const MissionContext = createContext<MissionContextValue | null>(null);
 
 interface MissionProviderProps {
   children: React.ReactNode;
@@ -175,6 +185,9 @@ export function MissionProvider({ children, tripId }: MissionProviderProps) {
   // ── Route ────────────────────────────────────────────────────────────────
   const { polyline, etaSeconds, routeSource } = useMissionRoute(origin, destination);
 
+  // ── Road-aligned corridor geometry ──────────────────────────────────────
+  const corridorGeometry = useCorridorGeometry(polyline, 75, origin, destination);
+
   // ── Mission state ────────────────────────────────────────────────────────
   const missionState: MissionStateLabel = useMemo(() => {
     if (!trip) return 'Pending';
@@ -197,6 +210,7 @@ export function MissionProvider({ children, tripId }: MissionProviderProps) {
     polyline,
     etaSeconds,
     routeSource,
+    corridorGeometry,
     goldenHourMs,
     remainingMs,
     elapsedMs,

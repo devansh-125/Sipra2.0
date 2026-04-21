@@ -5,6 +5,7 @@ import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { ScatterplotLayer } from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
+import type { Geometry } from 'geojson';
 
 import { useExclusionLayer } from './ExclusionPolygon';
 import { useFleetLayer } from './FleetSwarm';
@@ -12,6 +13,7 @@ import { useHospitalLayer } from './HospitalMarkers';
 import { useRoutePathLayer } from './RoutePath';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
 import { useAmbulanceAnimation } from '../../hooks/useAmbulanceAnimation';
+import { useHospitalNames } from '../../hooks/useHospitalNames';
 import type { FleetVehicle, GeoPoint, HandoffInitiatedPayload } from '../../lib/types';
 
 // Default viewport: Indiranagar, Bangalore — matches the simulator's route origin.
@@ -52,10 +54,16 @@ function DeckGLOverlay({ layers }: { layers: (Layer | null)[] }) {
 // --------------------------------------------------------------------------
 // MapLegend
 // --------------------------------------------------------------------------
-function MapLegend({ fleetCount, evadingCount, routeSource }: {
+function MapLegend({
+  fleetCount, evadingCount, routeSource, corridorSource,
+  originName, destinationName,
+}: {
   fleetCount: number;
   evadingCount: number;
   routeSource?: string;
+  corridorSource?: 'road-aligned' | 'ws-based' | 'none';
+  originName?: string;
+  destinationName?: string;
 }) {
   return (
     <div style={{
@@ -63,9 +71,26 @@ function MapLegend({ fleetCount, evadingCount, routeSource }: {
       padding: '10px 16px', borderRadius: 8,
       background: 'rgba(0,0,0,0.80)',
       color: '#fff', fontFamily: 'monospace', fontSize: 12, lineHeight: 2,
-      minWidth: 200,
+      minWidth: 220,
     }}>
-      <div style={{ color: '#ff2828', fontWeight: 700 }}>⬛ EXCLUSION ZONE</div>
+      {/* Hospital route summary */}
+      {(originName || destinationName) && (
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ color: '#60a5fa', fontWeight: 700, fontSize: 10, letterSpacing: 1, marginBottom: 2 }}>ACTIVE ROUTE</div>
+          <div style={{ color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ color: '#22c55e' }}>✚</span>
+            <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{originName ?? 'Pickup Hospital'}</span>
+          </div>
+          <div style={{ color: '#6b7280', fontSize: 10, paddingLeft: 16 }}>↓</div>
+          <div style={{ color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ color: '#ef4444' }}>✚</span>
+            <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{destinationName ?? 'Destination Hospital'}</span>
+          </div>
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', margin: '6px 0 2px' }} />
+        </div>
+      )}
+      <div style={{ color: '#ff4444', fontWeight: 700 }}>▬ CORRIDOR (emergency zone)</div>
+      <div style={{ color: '#ff8c00', fontSize: 10, marginTop: -4 }}>  ⚠ 150 m warning band</div>
       <div style={{ color: '#1e78ff' }}>● FLEET  ({fleetCount} vehicles)</div>
       <div style={{ color: '#ffa500' }}>● EVADING  ({evadingCount} rerouting)</div>
       <div style={{ color: '#ffffff' }}>◎ AMBULANCE</div>
@@ -81,7 +106,15 @@ function MapLegend({ fleetCount, evadingCount, routeSource }: {
           color: routeSource === 'api' ? '#22c55e' : routeSource === 'simulation' ? '#fbbf24' : '#6b7280',
           fontSize: 10,
         }}>
-          ⬤ ROUTE: {routeSource === 'api' ? 'LIVE API' : routeSource === 'simulation' ? 'SIMULATION' : 'LOADING…'}
+          ⬤ ROUTE: {routeSource === 'api' ? 'LIVE API (road-aligned)' : routeSource === 'simulation' ? 'SIMULATION (road-shaped)' : 'LOADING…'}
+        </div>
+      )}
+      {corridorSource && corridorSource !== 'none' && (
+        <div style={{
+          color: corridorSource === 'road-aligned' ? '#22c55e' : '#fbbf24',
+          fontSize: 10,
+        }}>
+          ⬤ CORRIDOR: {corridorSource === 'road-aligned' ? 'ROAD-ALIGNED' : 'PING-BASED'}
         </div>
       )}
     </div>
@@ -100,6 +133,8 @@ interface MapSceneProps {
   etaSeconds?: number;
   startedAt?: string | null;
   routeSource?: string;
+  /** Road-aligned corridor from MissionContext (preferred). */
+  corridorGeometry?: Geometry | null;
 }
 
 function MapScene({
@@ -111,10 +146,12 @@ function MapScene({
   etaSeconds = 0,
   startedAt,
   routeSource,
+  corridorGeometry,
 }: MapSceneProps) {
   const { ambulanceLat, ambulanceLng, corridorGeoJSON, handoffState } =
     useSipraWebSocket(backendWsUrl);
   const map = useMap();
+  const { originName, destinationName } = useHospitalNames(origin, destination);
   const didFitRef = useRef(false);
 
   useEffect(() => {
@@ -160,6 +197,13 @@ function MapScene({
     }
   }, [map, polyline, origin, destination]);
 
+  // ── Prefer road-aligned corridor; fall back to WS-pushed GeoJSON ──────
+  const activeCorridor: Geometry | null = corridorGeometry ?? corridorGeoJSON;
+  const corridorSource: 'road-aligned' | 'ws-based' | 'none' =
+    corridorGeometry ? 'road-aligned'
+    : corridorGeoJSON ? 'ws-based'
+    : 'none';
+
   // ── Layers ─────────────────────────────────────────────────────────────
   const ambulanceLayer = useMemo(() => {
     return new ScatterplotLayer({
@@ -179,16 +223,24 @@ function MapScene({
   }, [ambulance.lat, ambulance.lng]);
 
   const routePathLayer = useRoutePathLayer(origin, destination, polyline);
-  const hospitalLayer  = useHospitalLayer(origin, destination);
-  const exclusionLayer = useExclusionLayer(corridorGeoJSON, handoffState ? 2 : 1);
-  const fleetLayer     = useFleetLayer(fleet);
+  const hospitalLayers = useHospitalLayer(origin, destination, { originName, destinationName });
+  const exclusionLayer = useExclusionLayer(activeCorridor, handoffState ? 2 : 1);
+  // useFleetLayer returns [circleLayer, arrowLayer] — spread both
+  const [fleetCircleLayer, fleetArrowLayer] = useFleetLayer(fleet);
 
   const evadingCount = fleet.filter(v => v.evading).length;
 
   return (
     <>
-      <MapLegend fleetCount={fleet.length} evadingCount={evadingCount} routeSource={routeSource} />
-      <DeckGLOverlay layers={[routePathLayer, hospitalLayer, exclusionLayer, fleetLayer, ambulanceLayer]} />
+      <MapLegend
+        fleetCount={fleet.length}
+        evadingCount={evadingCount}
+        routeSource={routeSource}
+        corridorSource={corridorSource}
+        originName={originName}
+        destinationName={destinationName}
+      />
+      <DeckGLOverlay layers={[routePathLayer, ...hospitalLayers, exclusionLayer, fleetCircleLayer, fleetArrowLayer, ambulanceLayer]} />
     </>
   );
 }
@@ -207,6 +259,8 @@ interface CorridorMapProps {
   etaSeconds?: number;
   startedAt?: string | null;
   routeSource?: string;
+  /** Road-aligned corridor polygon from MissionContext (preferred over WS GeoJSON). */
+  corridorGeometry?: Geometry | null;
 }
 
 export default function CorridorMap({
@@ -219,6 +273,7 @@ export default function CorridorMap({
   etaSeconds = 0,
   startedAt,
   routeSource,
+  corridorGeometry,
 }: CorridorMapProps) {
   return (
     <APIProvider apiKey={googleMapsApiKey}>
@@ -239,6 +294,7 @@ export default function CorridorMap({
             etaSeconds={etaSeconds}
             startedAt={startedAt}
             routeSource={routeSource}
+            corridorGeometry={corridorGeometry}
           />
         </Map>
       </div>
