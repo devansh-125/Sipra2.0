@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, Loader2 } from 'lucide-react';
+import { ShieldCheck, Loader2, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { createTrip } from '@/lib/api';
@@ -10,6 +10,14 @@ import { HOSPITALS } from './hospitals';
 
 const CARGO_OPTIONS = ['Liver', 'Heart', 'Volatile Vaccine', 'Blood Platelets'] as const;
 type CargoOption = (typeof CARGO_OPTIONS)[number];
+
+// Maps display labels to domain CargoCategory enum values accepted by the Go backend.
+const CARGO_TO_CATEGORY: Record<CargoOption, string> = {
+  'Liver':            'Organ',
+  'Heart':            'Organ',
+  'Volatile Vaccine': 'Vaccine',
+  'Blood Platelets':  'Blood',
+};
 
 function defaultDeadline(): string {
   const d = new Date(Date.now() + 60 * 60 * 1000);
@@ -48,7 +56,7 @@ export default function IntakePortal() {
       const res = await createTrip({
         origin:               { lat: src.lat,  lng: src.lng  },
         destination:          { lat: dest.lat, lng: dest.lng },
-        cargo_category:       cargo,
+        cargo_category:       CARGO_TO_CATEGORY[cargo],
         cargo_description:    cargo,
         golden_hour_deadline: new Date(deadline).toISOString(),
         ambulance_id:         'AMB-001',
@@ -58,6 +66,10 @@ export default function IntakePortal() {
       toast.error(err instanceof Error ? err.message : 'Failed to create trip');
       setSubmitting(false);
     }
+  }
+
+  function handleDemoLaunch() {
+    router.push('/dashboard');
   }
 
   return (
@@ -147,6 +159,15 @@ export default function IntakePortal() {
             ) : (
               'Initiate Critical Corridor'
             )}
+          </Button>
+
+          <Button
+            type="button"
+            onClick={handleDemoLaunch}
+            className="w-full bg-transparent border border-blue-500/50 hover:border-blue-400 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300 shadow-[0_0_20px_-8px_rgba(59,130,246,0.5)] hover:shadow-[0_0_25px_-5px_rgba(59,130,246,0.6)] uppercase tracking-[0.2em] font-semibold py-6 transition-all duration-200"
+          >
+            <Zap className="w-4 h-4 mr-2" />
+            Launch Hackathon Demo (Simulation)
           </Button>
 
         </form>
