@@ -9,6 +9,7 @@ import type { Layer } from '@deck.gl/core';
 import { useExclusionLayer } from './ExclusionPolygon';
 import { useFleetLayer } from './FleetSwarm';
 import { useHospitalLayer } from './HospitalMarkers';
+import { useRoutePathLayer } from './RoutePath';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
 import type { FleetVehicle, GeoPoint, HandoffInitiatedPayload } from '../../lib/types';
 
@@ -146,6 +147,7 @@ function MapScene({
     });
   }, [ambulanceLat, ambulanceLng]);
 
+  const routePathLayer = useRoutePathLayer(origin, destination);
   const hospitalLayer = useHospitalLayer(origin, destination);
   const exclusionLayer = useExclusionLayer(corridorGeoJSON, handoffState ? 2 : 1);
   const fleetLayer = useFleetLayer(fleet);
@@ -155,7 +157,7 @@ function MapScene({
   return (
     <>
       <MapLegend fleetCount={fleet.length} evadingCount={evadingCount} />
-      <DeckGLOverlay layers={[hospitalLayer, exclusionLayer, fleetLayer, ambulanceLayer]} />
+      <DeckGLOverlay layers={[routePathLayer, hospitalLayer, exclusionLayer, fleetLayer, ambulanceLayer]} />
     </>
   );
 }
