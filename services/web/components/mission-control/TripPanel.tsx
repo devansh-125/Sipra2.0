@@ -1,17 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { ScrollArea } from '../ui/scroll-area';
-import { getTrip } from '../../lib/api';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
-import type { Trip, TripStatus, CargoCategory } from '../../lib/types';
+import { useMission, type UrgencyLevel, type MissionStateLabel } from '../../lib/MissionContext';
+import type { TripStatus, CargoCategory } from '../../lib/types';
 
 const WS_URL =
   process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/dashboard';
 
-const DEMO_TRIP_ID = process.env.NEXT_PUBLIC_DEMO_TRIP_ID ?? '';
+// ── Colour mappings ─────────────────────────────────────────────────────────
 
 const STATUS_CLASS: Record<TripStatus, string> = {
   Pending:      'bg-slate-500 text-white',
@@ -21,12 +21,27 @@ const STATUS_CLASS: Record<TripStatus, string> = {
   Failed:       'bg-red-600 text-white',
 };
 
+const MISSION_STATE_CLASS: Record<MissionStateLabel, string> = {
+  Pending:   'bg-slate-500 text-white',
+  Active:    'bg-blue-600 text-white',
+  Completed: 'bg-green-600 text-white',
+  Failed:    'bg-red-600 text-white',
+};
+
+const URGENCY_CONFIG: Record<UrgencyLevel, { label: string; class: string; barColor: string; pulse: boolean }> = {
+  normal:   { label: 'Normal',   class: 'bg-green-600 text-white',  barColor: 'bg-green-500',  pulse: false },
+  elevated: { label: 'Elevated', class: 'bg-amber-500 text-white',  barColor: 'bg-amber-500',  pulse: false },
+  critical: { label: 'Critical', class: 'bg-red-600 text-white',    barColor: 'bg-red-500',    pulse: true  },
+};
+
 const CARGO_VARIANT: Record<CargoCategory, 'default' | 'destructive' | 'secondary' | 'outline'> = {
   Organ:      'destructive',
   Blood:      'destructive',
   Vaccine:    'default',
   Medication: 'secondary',
 };
+
+// ── Formatters ──────────────────────────────────────────────────────────────
 
 function formatHMS(ms: number): string {
   if (ms <= 0) return '00:00:00';
@@ -41,138 +56,162 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function fmtETA(seconds: number): string {
+  if (seconds <= 0) return '–';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// ── Component ───────────────────────────────────────────────────────────────
+
 export default function TripPanel() {
-  const [trip, setTrip] = useState<Trip | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [remaining, setRemaining] = useState(0);
-  const [eventsOpen, setEventsOpen] = useState(false);
+  const {
+    trip, tripError, tripLoading,
+    remainingMs, elapsedMs, goldenHourMs,
+    urgencyLevel, missionState,
+    etaSeconds, routeSource,
+  } = useMission();
 
   const { recentEvents } = useSipraWebSocket(WS_URL);
+  const [eventsOpen, setEventsOpen] = useState(false);
 
-  useEffect(() => {
-    if (!DEMO_TRIP_ID) {
-      setError('Set NEXT_PUBLIC_DEMO_TRIP_ID to a seeded trip UUID');
-      setLoading(false);
-      return;
-    }
-    getTrip(DEMO_TRIP_ID)
-      .then(t => { setTrip(t); setLoading(false); })
-      .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : 'Failed to load trip');
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    if (!trip) return;
-    const deadline = new Date(trip.golden_hour_deadline).getTime();
-    const tick = () => setRemaining(Math.max(0, deadline - Date.now()));
-    tick();
-    const id = setInterval(tick, 1_000);
-    return () => clearInterval(id);
-  }, [trip]);
-
-  if (loading) {
+  // ── Loading / error states ────────────────────────────────────────────────
+  if (tripLoading) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm font-mono">
         Loading trip…
       </div>
     );
   }
-
-  if (error || !trip) {
+  if (tripError || !trip) {
     return (
       <div className="flex-1 flex items-center justify-center text-red-400 text-sm font-mono px-4 text-center">
-        {error ?? 'Trip not found'}
+        {tripError ?? 'Trip not found'}
       </div>
     );
   }
 
-  const deadline = new Date(trip.golden_hour_deadline).getTime();
-  const created  = new Date(trip.created_at).getTime();
-  const total    = Math.max(1, deadline - created);
-  const elapsed  = Math.max(0, Date.now() - created);
-  const progress = Math.min(100, (elapsed / total) * 100);
-  const expired  = remaining === 0;
-
-  const barColor =
-    progress > 80 ? 'bg-red-500' :
-    progress > 50 ? 'bg-amber-500' :
-    'bg-green-500';
-
-  const recent5 = recentEvents.slice(0, 5);
+  // ── Derived values ────────────────────────────────────────────────────────
+  const progress   = Math.min(100, (elapsedMs / Math.max(1, goldenHourMs)) * 100);
+  const expired    = remainingMs === 0;
+  const urgencyCfg = URGENCY_CONFIG[urgencyLevel];
+  const recent5    = recentEvents.slice(0, 5);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
+
+      {/* ── Mission state + urgency ──────────────────────────────────────── */}
       <Card className="bg-card border-border">
         <CardHeader className="pb-2">
           <CardTitle className="text-xs font-mono text-muted-foreground uppercase tracking-widest">
-            Active Mission
+            Mission Status
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+
+          {/* Mission state pill */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${MISSION_STATE_CLASS[missionState]}`}>
+              {missionState}
+            </span>
+            {trip.status !== missionState && (
+              <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${STATUS_CLASS[trip.status]}`}>
+                {trip.status}
+              </span>
+            )}
+          </div>
+
           {/* Trip ID */}
-          <p
-            className="font-mono text-sm text-foreground truncate"
-            title={trip.id}
-          >
+          <p className="font-mono text-sm text-foreground truncate" title={trip.id}>
             {trip.id.slice(0, 8)}…
           </p>
 
-          {/* Cargo badge + status pill */}
+          {/* Cargo */}
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={CARGO_VARIANT[trip.cargo.category]}>
               {trip.cargo.category}
             </Badge>
-            <span
-              className={`text-xs font-mono px-2 py-0.5 rounded-full ${STATUS_CLASS[trip.status]}`}
-            >
-              {trip.status}
-            </span>
+            {trip.cargo.description && (
+              <span className="text-xs text-muted-foreground truncate max-w-[160px]" title={trip.cargo.description}>
+                {trip.cargo.description}
+              </span>
+            )}
           </div>
 
-          {/* Golden-hour countdown */}
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground font-mono uppercase tracking-wide">
-              Golden Hour
+          {/* Ambulance ID */}
+          <p className="font-mono text-xs text-muted-foreground truncate" title={trip.ambulance_id}>
+            Amb: {trip.ambulance_id}
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* ── Golden Hour countdown ────────────────────────────────────────── */}
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-xs font-mono text-muted-foreground uppercase tracking-widest flex items-center justify-between">
+            <span>Golden Hour</span>
+            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${urgencyCfg.class} ${urgencyCfg.pulse ? 'animate-pulse' : ''}`}>
+              {urgencyCfg.label}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+
+          {/* Remaining */}
+          <div className="space-y-0.5">
+            <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-wide">Remaining</p>
+            <p className={`text-2xl font-mono font-bold tabular-nums ${expired ? 'text-red-500 animate-pulse' : 'text-foreground'}`}>
+              {formatHMS(remainingMs)}
             </p>
-            <p
-              className={`text-2xl font-mono font-bold tabular-nums ${expired ? 'text-red-500' : 'text-foreground'}`}
-            >
-              {formatHMS(remaining)}
+          </div>
+
+          {/* Elapsed */}
+          <div className="space-y-0.5">
+            <p className="text-[10px] text-muted-foreground font-mono uppercase tracking-wide">Elapsed</p>
+            <p className="text-sm font-mono tabular-nums text-muted-foreground">
+              {formatHMS(elapsedMs)}
             </p>
           </div>
 
           {/* Progress bar */}
           <div className="space-y-1">
-            <div className="flex justify-between text-xs text-muted-foreground font-mono">
-              <span>Elapsed</span>
+            <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
+              <span>0%</span>
               <span>{Math.round(progress)}%</span>
+              <span>100%</span>
             </div>
-            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+            <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-1000 ${barColor}`}
+                className={`h-full rounded-full transition-all duration-1000 ${urgencyCfg.barColor} ${urgencyCfg.pulse ? 'animate-pulse' : ''}`}
                 style={{ width: `${progress}%` }}
               />
             </div>
           </div>
 
-          {/* Meta */}
-          <div className="space-y-0.5 text-xs font-mono text-muted-foreground">
-            <p className="truncate" title={trip.ambulance_id}>
-              Amb: {trip.ambulance_id}
-            </p>
-            {trip.cargo.description && (
-              <p className="truncate" title={trip.cargo.description}>
-                {trip.cargo.description}
-              </p>
-            )}
+          {/* ETA from route */}
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="text-muted-foreground">Route ETA</span>
+            <span className="text-foreground">{fmtETA(etaSeconds)}</span>
+          </div>
+
+          {/* Route source indicator */}
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${
+              routeSource === 'api' ? 'bg-green-500' :
+              routeSource === 'simulation' ? 'bg-amber-400' :
+              'bg-slate-500 animate-pulse'
+            }`} />
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {routeSource === 'api' ? 'Live routing (API)' :
+               routeSource === 'simulation' ? 'Simulated route' :
+               'Computing route…'}
+            </span>
           </div>
         </CardContent>
       </Card>
 
-      {/* Recent events */}
+      {/* ── Recent events ────────────────────────────────────────────────── */}
       <Card className="bg-card border-border">
         <CardHeader
           className="pb-2 cursor-pointer select-none"

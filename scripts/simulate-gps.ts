@@ -21,6 +21,7 @@ import type { Polygon, MultiPolygon } from 'geojson';
 // ---------------------------------------------------------------------------
 const BACKEND_HTTP = process.env.BACKEND_URL ?? 'http://localhost:8080';
 const BACKEND_WS   = process.env.BACKEND_WS   ?? 'ws://localhost:8080/ws/dashboard';
+const FRONTEND_URL = process.env.FRONTEND_URL ?? 'http://localhost:3000';
 const FLEET_PORT   = Number(process.env.FLEET_PORT ?? 4001);
 const PING_INTERVAL_MS = 1_000;
 const FLEET_SIZE       = 50;
@@ -28,25 +29,51 @@ const FLEET_SIZE       = 50;
 const EVASION_STEP_DEG = 0.00008;
 
 // ---------------------------------------------------------------------------
-// Ambulance route — interpolated waypoints through Indiranagar → Koramangala.
-// The simulator cycles through these continuously so the demo never ends.
+// Real hospital coordinates (Bangalore)
+// Used as origin / destination for the trip. Also sent to the Directions API.
 // ---------------------------------------------------------------------------
-const ROUTE: [number, number][] = [
-  [12.9783, 77.6408],
-  [12.9765, 77.6385],
-  [12.9748, 77.6362],
-  [12.9731, 77.6339],
-  [12.9714, 77.6316],
-  [12.9697, 77.6293],
-  [12.9680, 77.6270],
-  [12.9663, 77.6247],
-  [12.9646, 77.6224],
-  [12.9629, 77.6201],
+const HOSPITAL_ORIGIN = { lat: 12.9656, lng: 77.5713 };      // Victoria Hospital
+const HOSPITAL_DEST   = { lat: 12.9587, lng: 77.6442 };      // Manipal Hospital, HAL
+
+// ---------------------------------------------------------------------------
+// Hardcoded fallback route — Indiranagar → Koramangala.
+// Used when the Directions API is unavailable.
+// ---------------------------------------------------------------------------
+const DEFAULT_ROUTE: [number, number][] = [
+  [12.9656, 77.5713],  // Victoria Hospital
+  [12.9665, 77.5780],
+  [12.9680, 77.5860],
+  [12.9700, 77.5950],
+  [12.9710, 77.6050],
+  [12.9720, 77.6130],
+  [12.9680, 77.6240],
+  [12.9640, 77.6310],
+  [12.9610, 77.6380],
+  [12.9587, 77.6442],  // Manipal Hospital, HAL
 ];
+let ROUTE: [number, number][] = DEFAULT_ROUTE;
 const SUBSTEPS = 10; // linear interpolation steps between each waypoint pair
 
 // ---------------------------------------------------------------------------
 // Types
+// ---------------------------------------------------------------------------
+// Google encoded polyline decoder (precision 1e-5)
+// ---------------------------------------------------------------------------
+function decodePolyline(encoded: string): { lat: number; lng: number }[] {
+  const result: { lat: number; lng: number }[] = [];
+  let index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    let shift = 0, result_val = 0, b: number;
+    do { b = encoded.charCodeAt(index++) - 63; result_val |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (result_val & 1) ? ~(result_val >> 1) : (result_val >> 1);
+    shift = 0; result_val = 0;
+    do { b = encoded.charCodeAt(index++) - 63; result_val |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (result_val & 1) ? ~(result_val >> 1) : (result_val >> 1);
+    result.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 interface FleetVehicle {
   id: string;
@@ -112,18 +139,50 @@ function spawnFleet(centerLat: number, centerLng: number): FleetVehicle[] {
 // ---------------------------------------------------------------------------
 async function main(): Promise<void> {
 
+  // 0. Attempt to fetch real road-geometry waypoints from the Directions proxy.
+  console.log('🗺   Fetching real route from Directions API…');
+  try {
+    const params = new URLSearchParams({
+      origin:      `${HOSPITAL_ORIGIN.lat},${HOSPITAL_ORIGIN.lng}`,
+      destination: `${HOSPITAL_DEST.lat},${HOSPITAL_DEST.lng}`,
+    });
+    const routeRes = await fetch(`${FRONTEND_URL}/api/route/directions?${params}`, {
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (routeRes.ok) {
+      const routeData = await routeRes.json() as { polylineEncoded?: string; etaSeconds?: number };
+      if (routeData.polylineEncoded) {
+        // Decode Google's encoded polyline format.
+        const decoded = decodePolyline(routeData.polylineEncoded);
+        if (decoded.length >= 2) {
+          ROUTE = decoded.map(p => [p.lat, p.lng] as [number, number]);
+          console.log(`✅  Real route loaded (${ROUTE.length} waypoints, ETA ${routeData.etaSeconds}s)`);
+        } else {
+          console.warn('⚠️  Decoded polyline too short — using fallback route');
+        }
+      } else {
+        console.warn('⚠️  No polyline in response — using fallback route');
+      }
+    } else {
+      console.warn(`⚠️  Route proxy returned ${routeRes.status} — using fallback route`);
+    }
+  } catch (err) {
+    console.warn('⚠️  Could not reach route proxy — using fallback route:', (err as Error).message);
+  }
+
   // 1. Create a trip on the backend.
   console.log('🚑  Creating demo trip…');
   const tripRes = await fetch(`${BACKEND_HTTP}/api/v1/trips`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      cargo_category: 'organ',
+      cargo_category:    'organ',
       cargo_description: 'Hackathon Demo — Kidney',
-      origin:      { lat: ROUTE[0][0], lng: ROUTE[0][1] },
-      destination: { lat: ROUTE[ROUTE.length - 1][0], lng: ROUTE[ROUTE.length - 1][1] },
+      origin:            { lat: ROUTE[0][0], lng: ROUTE[0][1] },
+      destination:       { lat: ROUTE[ROUTE.length - 1][0], lng: ROUTE[ROUTE.length - 1][1] },
       golden_hour_deadline: new Date(Date.now() + 3_600_000).toISOString(),
-      ambulance_id: 'AMB-DEMO-01',
+      ambulance_id:      'AMB-DEMO-01',
+      hospital_dispatch_id: 'Victoria-Hospital-BLR',
     }),
   });
   if (!tripRes.ok) {

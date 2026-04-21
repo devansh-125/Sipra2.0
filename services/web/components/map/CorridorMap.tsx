@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { ScatterplotLayer } from '@deck.gl/layers';
@@ -11,18 +11,15 @@ import { useFleetLayer } from './FleetSwarm';
 import { useHospitalLayer } from './HospitalMarkers';
 import { useRoutePathLayer } from './RoutePath';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
+import { useAmbulanceAnimation } from '../../hooks/useAmbulanceAnimation';
 import type { FleetVehicle, GeoPoint, HandoffInitiatedPayload } from '../../lib/types';
 
 // Default viewport: Indiranagar, Bangalore — matches the simulator's route origin.
 const DEFAULT_CENTER = { lat: 12.9783, lng: 77.6408 };
-const FLEET_WS_URL = 'ws://localhost:4001';
+const FLEET_WS_URL = process.env.NEXT_PUBLIC_SIM_WS_URL ?? 'ws://localhost:4001';
 
 // --------------------------------------------------------------------------
 // DeckGLOverlay
-// Mounts a single GoogleMapsOverlay inside the Maps context and synchronises
-// its layer list on every render. Using useEffect without a dependency array
-// for the setProps call is intentional: we want to flush layer updates every
-// render cycle so the pulsing animation always reaches the GL canvas.
 // --------------------------------------------------------------------------
 function DeckGLOverlay({ layers }: { layers: (Layer | null)[] }) {
   const map = useMap();
@@ -32,9 +29,6 @@ function DeckGLOverlay({ layers }: { layers: (Layer | null)[] }) {
     if (!map) return;
     const overlay = new GoogleMapsOverlay({ layers: [] });
     overlayRef.current = overlay;
-    // Defer setMap to next animation frame — Google Maps calls draw() synchronously
-    // inside setMap, before the overlay's internal _map is set, causing addListener
-    // to be called on null. One RAF gives the map's own setup cycle time to complete.
     const rafId = requestAnimationFrame(() => {
       if (overlayRef.current === overlay) overlay.setMap(map);
     });
@@ -56,9 +50,13 @@ function DeckGLOverlay({ layers }: { layers: (Layer | null)[] }) {
 }
 
 // --------------------------------------------------------------------------
-// MapLegend — bottom-right overlay (connection status lives in StatusBar)
+// MapLegend
 // --------------------------------------------------------------------------
-function MapLegend({ fleetCount, evadingCount }: { fleetCount: number; evadingCount: number }) {
+function MapLegend({ fleetCount, evadingCount, routeSource }: {
+  fleetCount: number;
+  evadingCount: number;
+  routeSource?: string;
+}) {
   return (
     <div style={{
       position: 'absolute', top: 16, right: 16, zIndex: 10,
@@ -76,19 +74,32 @@ function MapLegend({ fleetCount, evadingCount }: { fleetCount: number; evadingCo
       <div style={{ color: '#22c55e' }}>◉ COMPLETED</div>
       <div style={{ color: '#ef4444' }}>◉ FAILED</div>
       <div style={{ color: '#00d2be' }}>━ REROUTE PATH</div>
+      {routeSource && (
+        <div style={{
+          borderTop: '1px solid rgba(255,255,255,0.15)',
+          marginTop: 4, paddingTop: 4,
+          color: routeSource === 'api' ? '#22c55e' : routeSource === 'simulation' ? '#fbbf24' : '#6b7280',
+          fontSize: 10,
+        }}>
+          ⬤ ROUTE: {routeSource === 'api' ? 'LIVE API' : routeSource === 'simulation' ? 'SIMULATION' : 'LOADING…'}
+        </div>
+      )}
     </div>
   );
 }
 
 // --------------------------------------------------------------------------
-// CorridorMap
+// MapScene — inner component that has access to the Google Maps instance
 // --------------------------------------------------------------------------
-interface CorridorMapProps {
-  googleMapsApiKey: string;
-  backendWsUrl?: string;
+interface MapSceneProps {
+  backendWsUrl: string;
   onHandoff?: (p: HandoffInitiatedPayload) => void;
   origin?: GeoPoint;
   destination?: GeoPoint;
+  polyline?: GeoPoint[];
+  etaSeconds?: number;
+  startedAt?: string | null;
+  routeSource?: string;
 }
 
 function MapScene({
@@ -96,27 +107,25 @@ function MapScene({
   onHandoff,
   origin,
   destination,
-}: {
-  backendWsUrl: string;
-  onHandoff?: (p: HandoffInitiatedPayload) => void;
-  origin?: GeoPoint;
-  destination?: GeoPoint;
-}) {
+  polyline = [],
+  etaSeconds = 0,
+  startedAt,
+  routeSource,
+}: MapSceneProps) {
   const { ambulanceLat, ambulanceLng, corridorGeoJSON, handoffState } =
     useSipraWebSocket(backendWsUrl);
   const map = useMap();
+  const didFitRef = useRef(false);
 
   useEffect(() => {
     if (handoffState) onHandoff?.(handoffState);
   }, [handoffState, onHandoff]);
 
+  // ── Fleet subscribers (port 4001) ─────────────────────────────────────
   const [fleet, setFleet] = useState<FleetVehicle[]>([]);
-
-  // Fleet positions are served by the simulator's WebSocket on port 4001.
   useEffect(() => {
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
-
     const connect = () => {
       ws = new WebSocket(FLEET_WS_URL);
       ws.onmessage = ({ data }) => {
@@ -125,20 +134,37 @@ function MapScene({
       ws.onclose = () => { reconnectTimer = setTimeout(connect, 3_000); };
       ws.onerror = () => ws.close();
     };
-
     connect();
-    return () => {
-      ws?.close();
-      clearTimeout(reconnectTimer);
-    };
+    return () => { ws?.close(); clearTimeout(reconnectTimer); };
   }, []);
 
-  // Ambulance dot: white fill + red ring so it stands out on any map tile.
+  // ── Animated ambulance position (WS primary, polyline fallback) ────────
+  const ambulance = useAmbulanceAnimation(
+    ambulanceLat, ambulanceLng, polyline, etaSeconds, startedAt, origin,
+  );
+
+  // ── Fit map bounds to polyline once ───────────────────────────────────
+  useEffect(() => {
+    if (!map || didFitRef.current) return;
+    if (polyline.length >= 2) {
+      const bounds = new google.maps.LatLngBounds();
+      polyline.forEach(p => bounds.extend({ lat: p.lat, lng: p.lng }));
+      map.fitBounds(bounds, 60);
+      didFitRef.current = true;
+    } else if (origin && destination) {
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend({ lat: origin.lat, lng: origin.lng });
+      bounds.extend({ lat: destination.lat, lng: destination.lng });
+      map.fitBounds(bounds, 80);
+      // Don't mark done — refit when polyline arrives.
+    }
+  }, [map, polyline, origin, destination]);
+
+  // ── Layers ─────────────────────────────────────────────────────────────
   const ambulanceLayer = useMemo(() => {
-    if (ambulanceLat === null || ambulanceLng === null) return null;
     return new ScatterplotLayer({
       id: 'ambulance',
-      data: [{ lat: ambulanceLat, lng: ambulanceLng }],
+      data: [{ lat: ambulance.lat, lng: ambulance.lng }],
       getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
       getRadius: 14,
       getFillColor: [255, 255, 255, 240],
@@ -150,21 +176,37 @@ function MapScene({
       pickable: false,
       transitions: { getPosition: { duration: 300 } },
     });
-  }, [ambulanceLat, ambulanceLng]);
+  }, [ambulance.lat, ambulance.lng]);
 
-  const routePathLayer = useRoutePathLayer(origin, destination);
-  const hospitalLayer = useHospitalLayer(origin, destination);
+  const routePathLayer = useRoutePathLayer(origin, destination, polyline);
+  const hospitalLayer  = useHospitalLayer(origin, destination);
   const exclusionLayer = useExclusionLayer(corridorGeoJSON, handoffState ? 2 : 1);
-  const fleetLayer = useFleetLayer(fleet);
+  const fleetLayer     = useFleetLayer(fleet);
 
   const evadingCount = fleet.filter(v => v.evading).length;
 
   return (
     <>
-      <MapLegend fleetCount={fleet.length} evadingCount={evadingCount} />
+      <MapLegend fleetCount={fleet.length} evadingCount={evadingCount} routeSource={routeSource} />
       <DeckGLOverlay layers={[routePathLayer, hospitalLayer, exclusionLayer, fleetLayer, ambulanceLayer]} />
     </>
   );
+}
+
+// --------------------------------------------------------------------------
+// CorridorMap — public component
+// --------------------------------------------------------------------------
+interface CorridorMapProps {
+  googleMapsApiKey: string;
+  backendWsUrl?: string;
+  onHandoff?: (p: HandoffInitiatedPayload) => void;
+  origin?: GeoPoint;
+  destination?: GeoPoint;
+  /** Decoded road-geometry waypoints from the Directions API (or simulation). */
+  polyline?: GeoPoint[];
+  etaSeconds?: number;
+  startedAt?: string | null;
+  routeSource?: string;
 }
 
 export default function CorridorMap({
@@ -173,6 +215,10 @@ export default function CorridorMap({
   onHandoff,
   origin,
   destination,
+  polyline = [],
+  etaSeconds = 0,
+  startedAt,
+  routeSource,
 }: CorridorMapProps) {
   return (
     <APIProvider apiKey={googleMapsApiKey}>
@@ -189,6 +235,10 @@ export default function CorridorMap({
             onHandoff={onHandoff}
             origin={origin}
             destination={destination}
+            polyline={polyline}
+            etaSeconds={etaSeconds}
+            startedAt={startedAt}
+            routeSource={routeSource}
           />
         </Map>
       </div>

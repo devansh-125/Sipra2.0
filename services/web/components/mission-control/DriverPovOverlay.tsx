@@ -13,6 +13,7 @@ import { useDriverProximity } from '../../hooks/useDriverProximity';
 import { useRoutePathLayer } from '../map/RoutePath';
 import { useHospitalLayer } from '../map/HospitalMarkers';
 import { useExclusionLayer } from '../map/ExclusionPolygon';
+import { useMission } from '../../lib/MissionContext';
 import type { GeoPoint } from '../../lib/types';
 
 const DEFAULT_CENTER = { lat: 12.9783, lng: 77.6408 };
@@ -26,6 +27,8 @@ interface DriverPovOverlayProps {
   apiKey: string;
   origin?: GeoPoint;
   destination?: GeoPoint;
+  /** Decoded road-geometry waypoints — synced from MissionContext via parent. */
+  polyline?: GeoPoint[];
   open: boolean;
   onClose: () => void;
 }
@@ -67,11 +70,13 @@ const DRIVER_COLORS: Record<PovState, { fill: [number, number, number, number]; 
 function DriverScene({
   origin,
   destination,
+  polyline,
   onStateChange,
   onDistanceChange,
 }: {
   origin?: GeoPoint;
   destination?: GeoPoint;
+  polyline?: GeoPoint[];
   onStateChange: (s: PovState) => void;
   onDistanceChange: (d: number | null) => void;
 }) {
@@ -123,7 +128,7 @@ function DriverScene({
     didFitRef.current = true;
   }, [map, origin, destination, driverCenter.lat, driverCenter.lng]);
 
-  const routePathLayer = useRoutePathLayer(origin, destination);
+  const routePathLayer = useRoutePathLayer(origin, destination, polyline);
   const hospitalLayer = useHospitalLayer(origin, destination);
   const exclusionLayer = useExclusionLayer(corridorGeoJSON, povState === 'INSIDE' ? 2 : 1);
 
@@ -188,6 +193,32 @@ function ProximityAlert({ state, distanceM }: { state: PovState; distanceM: numb
 }
 
 function FooterCopy({ state, distanceM }: { state: PovState; distanceM: number | null }) {
+  const { remainingMs, goldenHourMs, urgencyLevel } = useMission();
+  const progress = Math.min(100, ((goldenHourMs - remainingMs) / Math.max(1, goldenHourMs)) * 100);
+  const barColor =
+    urgencyLevel === 'critical' ? 'bg-red-500' :
+    urgencyLevel === 'elevated' ? 'bg-amber-400' :
+    'bg-green-500';
+  const remainSec = Math.floor(remainingMs / 1000);
+  const remainMin = Math.floor(remainSec / 60);
+  const remainSecPart = remainSec % 60;
+  const fmtRemain = `${String(remainMin).padStart(2, '0')}:${String(remainSecPart).padStart(2, '0')}`;
+
+  const statusBlock = (
+    <div className="mt-1.5 space-y-0.5">
+      <div className="flex justify-between text-[10px] font-mono text-slate-500">
+        <span>Golden Hour</span>
+        <span className={urgencyLevel === 'critical' ? 'text-red-500 font-bold' : ''}>{fmtRemain}</span>
+      </div>
+      <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ${barColor} ${urgencyLevel === 'critical' ? 'animate-pulse' : ''}`}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </div>
+  );
+
   if (state === 'INSIDE') {
     return (
       <>
@@ -196,6 +227,7 @@ function FooterCopy({ state, distanceM }: { state: PovState; distanceM: number |
           <span className="text-[11px] text-slate-500">move away now</span>
         </div>
         <p className="text-[11px] text-slate-500 mt-0.5">Yield to the approaching ambulance.</p>
+        {statusBlock}
       </>
     );
   }
@@ -209,6 +241,7 @@ function FooterCopy({ state, distanceM }: { state: PovState; distanceM: number |
           )}
         </div>
         <p className="text-[11px] text-slate-500 mt-0.5">Prepare to reroute around the zone.</p>
+        {statusBlock}
       </>
     );
   }
@@ -219,6 +252,7 @@ function FooterCopy({ state, distanceM }: { state: PovState; distanceM: number |
         <span className="text-[11px] text-slate-500">safe to proceed</span>
       </div>
       <p className="text-[11px] text-slate-500 mt-0.5">No active corridor near your route.</p>
+      {statusBlock}
     </>
   );
 }
@@ -227,6 +261,7 @@ export default function DriverPovOverlay({
   apiKey,
   origin,
   destination,
+  polyline,
   open,
   onClose,
 }: DriverPovOverlayProps) {
@@ -286,6 +321,7 @@ export default function DriverPovOverlay({
                 <DriverScene
                   origin={origin}
                   destination={destination}
+                  polyline={polyline}
                   onStateChange={setPovState}
                   onDistanceChange={setDistanceM}
                 />

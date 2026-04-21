@@ -8,8 +8,7 @@ import StatusBar from './StatusBar';
 import HandoffOverlay from './HandoffOverlay';
 import DriverPovOverlay from './DriverPovOverlay';
 import RerouteStatusPanel from './RerouteStatusPanel';
-import { getTrip } from '../../lib/api';
-import type { GeoPoint } from '../../lib/types';
+import { MissionProvider, useMission } from '../../lib/MissionContext';
 
 const CorridorMap = dynamic(() => import('../map/CorridorMap'), {
   ssr: false,
@@ -20,27 +19,14 @@ const CorridorMap = dynamic(() => import('../map/CorridorMap'), {
   ),
 });
 
-export default function MissionControlLayout() {
+// Inner layout — reads from MissionContext.
+function MissionLayout() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
-  const searchParams = useSearchParams();
-  const tripId = searchParams.get('tripId');
-
-  const [origin, setOrigin] = useState<GeoPoint | undefined>(undefined);
-  const [destination, setDestination] = useState<GeoPoint | undefined>(undefined);
+  const {
+    origin, destination, polyline, etaSeconds, routeSource,
+    trip,
+  } = useMission();
   const [povOpen, setPovOpen] = useState(false);
-
-  useEffect(() => {
-    if (!tripId) return;
-    let cancelled = false;
-    getTrip(tripId)
-      .then(trip => {
-        if (cancelled) return;
-        setOrigin(trip.origin);
-        setDestination(trip.destination);
-      })
-      .catch(() => { /* silently skip — map still works without markers */ });
-    return () => { cancelled = true; };
-  }, [tripId]);
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-background">
@@ -59,6 +45,10 @@ export default function MissionControlLayout() {
             googleMapsApiKey={apiKey}
             origin={origin}
             destination={destination}
+            polyline={polyline}
+            etaSeconds={etaSeconds}
+            startedAt={trip?.started_at}
+            routeSource={routeSource}
           />
         </main>
       </div>
@@ -67,11 +57,24 @@ export default function MissionControlLayout() {
         apiKey={apiKey}
         origin={origin}
         destination={destination}
+        polyline={polyline}
         open={povOpen}
         onClose={() => setPovOpen(false)}
       />
 
       <HandoffOverlay />
     </div>
+  );
+}
+
+// Outer layout — provides MissionContext.
+export default function MissionControlLayout() {
+  const searchParams = useSearchParams();
+  const tripId = searchParams.get('tripId') ?? process.env.NEXT_PUBLIC_DEMO_TRIP_ID ?? null;
+
+  return (
+    <MissionProvider tripId={tripId}>
+      <MissionLayout />
+    </MissionProvider>
   );
 }
