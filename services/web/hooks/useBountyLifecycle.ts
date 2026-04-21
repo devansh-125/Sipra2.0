@@ -4,20 +4,26 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Geometry, MultiPolygon, Polygon, Position } from 'geojson';
 
 import { claimBounty, createBounty, verifyBounty } from '../lib/api';
-import type { Bounty, CreateBountyRequest } from '../lib/types';
+import type { Bounty, CreateBountyRequest, RerouteState } from '../lib/types';
 import type { ProximityState } from './useDriverProximity';
 
 // ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
 
-export type BountyLifecycleState = 'IDLE' | 'OFFERED' | 'CLAIMED' | 'VERIFIED' | 'ERROR';
+export type BountyLifecycleState = 'IDLE' | 'OFFERED' | 'CLAIMED' | 'VERIFIED' | 'EXPIRED' | 'ERROR';
 
 export interface BountyLifecycleResult {
   state: BountyLifecycleState;
   bounty: Bounty | null;
   checkpoint: { lat: number; lng: number } | null;
   distanceToCheckpointM: number | null;
+  /** Derived reroute status for UI badges */
+  rerouteStatus: RerouteState | null;
+  /** Countdown: ms remaining before CLAIMED expires */
+  timeRemainingMs: number;
+  /** Total time window in ms (for progress calculation) */
+  totalTimeMs: number;
   accept: () => void;
   dismiss: () => void;
   retry: () => void;
@@ -94,12 +100,61 @@ function polygonBackboneM(geo: Geometry): number {
 }
 
 // ---------------------------------------------------------------------------
+// Simple hash for corridor geometry — used for dedup key
+// ---------------------------------------------------------------------------
+function corridorHash(geo: Geometry): string {
+  const rings = corridorRings(geo);
+  if (rings.length === 0 || rings[0].length === 0) return 'empty';
+  // Hash from first 4 vertices of outer ring for speed
+  const pts = rings[0].slice(0, 4);
+  return pts.map(p => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join('|');
+}
+
+// ---------------------------------------------------------------------------
+// Dedup helpers — prevent multiple rewards for the same corridor event
+// ---------------------------------------------------------------------------
+const DEDUP_STORAGE_KEY = 'sipra.bounty_dedup';
+
+function dedupKey(tripId: string, geo: Geometry): string {
+  return `${tripId}:${corridorHash(geo)}`;
+}
+
+function isDeduplicated(tripId: string, geo: Geometry): boolean {
+  try {
+    const stored = sessionStorage.getItem(DEDUP_STORAGE_KEY);
+    if (!stored) return false;
+    const keys: string[] = JSON.parse(stored);
+    return keys.includes(dedupKey(tripId, geo));
+  } catch {
+    return false;
+  }
+}
+
+function markDeduplicated(tripId: string, geo: Geometry): void {
+  try {
+    const stored = sessionStorage.getItem(DEDUP_STORAGE_KEY);
+    const keys: string[] = stored ? JSON.parse(stored) : [];
+    const key = dedupKey(tripId, geo);
+    if (!keys.includes(key)) {
+      keys.push(key);
+      // Keep only last 20 entries to avoid unbounded growth
+      if (keys.length > 20) keys.shift();
+      sessionStorage.setItem(DEDUP_STORAGE_KEY, JSON.stringify(keys));
+    }
+  } catch {
+    // sessionStorage unavailable — skip silently
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const BASE_POINTS = 100;
 const CHECKPOINT_RADIUS_M = 50;
 const BOUNTY_TTL_MS = 15 * 60 * 1_000; // 15 min
+/** Time window for driver to reach checkpoint after accepting */
+const REROUTE_TIMEOUT_MS = 5 * 60 * 1_000; // 5 min
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -111,6 +166,17 @@ interface EntrySnapshot {
   geo: Geometry;
   lat: number;
   lng: number;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: dispatch custom event for cross-component sync
+// ---------------------------------------------------------------------------
+function dispatchRerouteEvent(status: RerouteState, tripId: string, bountyId?: string, points?: number) {
+  window.dispatchEvent(
+    new CustomEvent('reroute:status', {
+      detail: { status, tripId, bountyId, points },
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +192,11 @@ export function useBountyLifecycle(
   const [lifecycleState, setLifecycleState] = useState<BountyLifecycleState>('IDLE');
   const [bounty, setBounty] = useState<Bounty | null>(null);
   const [checkpoint, setCheckpoint] = useState<{ lat: number; lng: number } | null>(null);
+
+  // Timeout state
+  const [timeRemainingMs, setTimeRemainingMs] = useState(0);
+  const claimedAtRef = useRef<number | null>(null);
+  const timeoutTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Refs that must not trigger re-renders
   const prevProximityRef = useRef<ProximityState>(proximityState);
@@ -144,6 +215,8 @@ export function useBountyLifecycle(
   driverPosRef.current = driverPosition;
   const tripIdRef = useRef(tripId);
   tripIdRef.current = tripId;
+  const lifecycleStateRef = useRef(lifecycleState);
+  lifecycleStateRef.current = lifecycleState;
 
   // ---------------------------------------------------------------------------
   // Derived: distance to checkpoint — cheap haversine on every render tick
@@ -152,6 +225,68 @@ export function useBountyLifecycle(
     checkpoint !== null
       ? haversineM(driverPosition.lat, driverPosition.lng, checkpoint.lat, checkpoint.lng)
       : null;
+
+  // ---------------------------------------------------------------------------
+  // Derived: rerouteStatus for UI badges
+  // ---------------------------------------------------------------------------
+  const rerouteStatus: RerouteState | null =
+    lifecycleState === 'CLAIMED' ? 'rerouting' :
+    lifecycleState === 'VERIFIED' ? 'completed' :
+    lifecycleState === 'EXPIRED' ? 'failed' :
+    null;
+
+  // ---------------------------------------------------------------------------
+  // Timeout: start countdown when CLAIMED, expire if time runs out
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (lifecycleState === 'CLAIMED') {
+      if (claimedAtRef.current === null) {
+        claimedAtRef.current = Date.now();
+      }
+      const tick = () => {
+        const elapsed = Date.now() - (claimedAtRef.current ?? Date.now());
+        const remaining = Math.max(0, REROUTE_TIMEOUT_MS - elapsed);
+        setTimeRemainingMs(remaining);
+        if (remaining <= 0 && lifecycleStateRef.current === 'CLAIMED') {
+          setLifecycleState('EXPIRED');
+          dispatchRerouteEvent('failed', tripIdRef.current, bountyRef.current?.id);
+        }
+      };
+      tick();
+      timeoutTimerRef.current = setInterval(tick, 500);
+      return () => {
+        if (timeoutTimerRef.current) clearInterval(timeoutTimerRef.current);
+      };
+    } else {
+      // Reset timer state when leaving CLAIMED
+      if (lifecycleState !== 'EXPIRED') {
+        claimedAtRef.current = null;
+        setTimeRemainingMs(0);
+      }
+      if (timeoutTimerRef.current) {
+        clearInterval(timeoutTimerRef.current);
+        timeoutTimerRef.current = null;
+      }
+    }
+  }, [lifecycleState]);
+
+  // ---------------------------------------------------------------------------
+  // Auto-reset from terminal states (VERIFIED / EXPIRED) after 6s
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (lifecycleState === 'VERIFIED' || lifecycleState === 'EXPIRED') {
+      const timer = setTimeout(() => {
+        setLifecycleState('IDLE');
+        setBounty(null);
+        setCheckpoint(null);
+        claimedAtRef.current = null;
+        setTimeRemainingMs(0);
+        pendingOpRef.current = null;
+        entrySnapshotRef.current = null;
+      }, 6_000);
+      return () => clearTimeout(timer);
+    }
+  }, [lifecycleState]);
 
   // ---------------------------------------------------------------------------
   // doCreate — fires createBounty and drives IDLE→OFFERED or ERROR.
@@ -200,6 +335,9 @@ export function useBountyLifecycle(
       inflightRef.current
     ) return;
 
+    // Dedup: skip if this corridor event already earned a reward
+    if (isDeduplicated(tripId, corridorGeoJSON)) return;
+
     const pos = driverPosRef.current;
     const v = nearestVertex(corridorGeoJSON, pos.lat, pos.lng);
     if (!v) return;
@@ -211,7 +349,7 @@ export function useBountyLifecycle(
     entrySnapshotRef.current = snap;
     setCheckpoint(cp);
     doCreate(snap, cp);
-  }, [proximityState, corridorGeoJSON, lifecycleState, doCreate]);
+  }, [proximityState, corridorGeoJSON, lifecycleState, doCreate, tripId]);
 
   // ---------------------------------------------------------------------------
   // CLAIMED: auto-verify on each position tick when inside checkpoint radius
@@ -236,6 +374,11 @@ export function useBountyLifecycle(
         setBounty(b => (b ? { ...b, status: 'Verified' } : b));
         setLifecycleState('VERIFIED');
         pendingOpRef.current = null;
+        // Mark as deduplicated so same corridor event won't trigger again
+        if (entrySnapshotRef.current) {
+          markDeduplicated(tripIdRef.current, entrySnapshotRef.current.geo);
+        }
+        dispatchRerouteEvent('completed', tripIdRef.current, id, 50);
       })
       .catch(() => setLifecycleState('ERROR'))
       .finally(() => {
@@ -261,6 +404,7 @@ export function useBountyLifecycle(
           setLifecycleState('CLAIMED');
           pendingOpRef.current = null;
           inflightRef.current = false;
+          dispatchRerouteEvent('rerouting', tripIdRef.current, b.id);
         })
         .catch(() => {
           if (claimAttemptsRef.current < 1) {
@@ -314,6 +458,7 @@ export function useBountyLifecycle(
           setLifecycleState('CLAIMED');
           pendingOpRef.current = null;
           inflightRef.current = false;
+          dispatchRerouteEvent('rerouting', tripIdRef.current, b.id);
         })
         .catch(() => {
           setLifecycleState('ERROR');
@@ -331,6 +476,10 @@ export function useBountyLifecycle(
           setLifecycleState('VERIFIED');
           pendingOpRef.current = null;
           inflightRef.current = false;
+          if (entrySnapshotRef.current) {
+            markDeduplicated(tripIdRef.current, entrySnapshotRef.current.geo);
+          }
+          dispatchRerouteEvent('completed', tripIdRef.current, b.id, 50);
         })
         .catch(() => {
           setLifecycleState('ERROR');
@@ -339,5 +488,16 @@ export function useBountyLifecycle(
     }
   }, [lifecycleState, doCreate]);
 
-  return { state: lifecycleState, bounty, checkpoint, distanceToCheckpointM, accept, dismiss, retry };
+  return {
+    state: lifecycleState,
+    bounty,
+    checkpoint,
+    distanceToCheckpointM,
+    rerouteStatus,
+    timeRemainingMs,
+    totalTimeMs: REROUTE_TIMEOUT_MS,
+    accept,
+    dismiss,
+    retry,
+  };
 }

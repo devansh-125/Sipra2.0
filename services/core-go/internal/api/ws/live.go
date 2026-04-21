@@ -20,6 +20,7 @@ const (
 	MsgCorridorUpdate   MessageType = "CORRIDOR_UPDATE"
 	MsgHandoffInitiated MessageType = "HANDOFF_INITIATED"
 	MsgFleetSpawn       MessageType = "FLEET_SPAWN"
+	MsgRerouteStatus    MessageType = "REROUTE_STATUS"
 )
 
 // Envelope is the discriminated-union wrapper for all outbound WebSocket messages.
@@ -70,6 +71,16 @@ type FleetVehicle struct {
 // FleetSpawnPayload carries a batch of synthetic fleet vehicles to the dashboard.
 type FleetSpawnPayload struct {
 	Vehicles []FleetVehicle `json:"vehicles"`
+}
+
+// RerouteStatusPayload carries a driver's reroute lifecycle status change to
+// all connected dashboard clients, enabling real-time fleet reroute tracking.
+type RerouteStatusPayload struct {
+	DriverRef    string `json:"driver_ref"`
+	TripID       string `json:"trip_id"`
+	Status       string `json:"status"` // "rerouting", "completed", "failed"
+	BountyID     string `json:"bounty_id,omitempty"`
+	AmountPoints int    `json:"amount_points,omitempty"`
 }
 
 // client owns one WebSocket connection and its serialized write channel.
@@ -222,6 +233,22 @@ func (h *Hub) BroadcastFleetSpawn(vehicles []FleetVehicle) {
 		Type:      MsgFleetSpawn,
 		Timestamp: time.Now().UTC(),
 		Payload:   FleetSpawnPayload{Vehicles: vehicles},
+	})
+}
+
+// BroadcastRerouteStatus fans a REROUTE_STATUS envelope to every connected client.
+// This enables Mission Control to track individual driver reroute progress in real time.
+func (h *Hub) BroadcastRerouteStatus(driverRef, tripID, status, bountyID string, amountPoints int) {
+	h.broadcast(Envelope{
+		Type:      MsgRerouteStatus,
+		Timestamp: time.Now().UTC(),
+		Payload: RerouteStatusPayload{
+			DriverRef:    driverRef,
+			TripID:       tripID,
+			Status:       status,
+			BountyID:     bountyID,
+			AmountPoints: amountPoints,
+		},
 	})
 }
 

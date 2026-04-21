@@ -1,8 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Smartphone } from 'lucide-react';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
 import type { ConnectionStatus } from '../../hooks/useSipraWebSocket';
+
+interface StatusBarProps {
+  povOpen: boolean;
+  onTogglePov: () => void;
+}
 
 const WS_URL =
   process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/dashboard';
@@ -21,7 +27,7 @@ function freshnessColor(lastMessageAt: number | null, now: number): string {
   return 'bg-red-500';
 }
 
-export default function StatusBar() {
+export default function StatusBar({ povOpen, onTogglePov }: StatusBarProps) {
   const { status, lastMessageAt } = useSipraWebSocket(WS_URL);
   const [now, setNow] = useState(() => Date.now());
 
@@ -37,6 +43,20 @@ export default function StatusBar() {
       </span>
 
       <div className="flex items-center gap-4">
+        <button
+          type="button"
+          onClick={onTogglePov}
+          aria-pressed={povOpen}
+          className={`flex items-center gap-1.5 font-mono text-xs uppercase tracking-wide transition-colors ${
+            povOpen
+              ? 'text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Smartphone className="w-3 h-3" />
+          <span>Driver POV</span>
+        </button>
+
         {/* Feed freshness */}
         <div className="flex items-center gap-1.5">
           <span className={`w-2 h-2 rounded-full ${freshnessColor(lastMessageAt, now)}`} />

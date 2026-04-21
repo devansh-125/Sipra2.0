@@ -78,6 +78,31 @@ export function exitDirectionLabel(
   return `Head ~${dir} — approx. ${distM}m to exit the corridor`;
 }
 
+/**
+ * Generates dashed segments along a path for visual distinction.
+ * Returns alternating segments so the path appears as a dashed line.
+ */
+function dashedPath(from: Coord, to: Coord, segments: number = 12): { path: Coord[] }[] {
+  const result: { path: Coord[] }[] = [];
+  for (let i = 0; i < segments; i++) {
+    // Only emit odd segments (dashes), skip even (gaps)
+    if (i % 2 === 0) {
+      const t0 = i / segments;
+      const t1 = (i + 1) / segments;
+      const p0: Coord = [
+        from[0] + (to[0] - from[0]) * t0,
+        from[1] + (to[1] - from[1]) * t0,
+      ];
+      const p1: Coord = [
+        from[0] + (to[0] - from[0]) * t1,
+        from[1] + (to[1] - from[1]) * t1,
+      ];
+      result.push({ path: [p0, p1] });
+    }
+  }
+  return result;
+}
+
 export function useExitPathLayer(
   corridorGeoJSON: Geometry | null,
   driverPosition: LatLng,
@@ -99,12 +124,16 @@ export function useExitPathLayer(
     }
 
     const dp: Coord = [driverPosition.lng, driverPosition.lat];
+    const segments = dashedPath(dp, target);
+
+    // Cyan/teal color — distinct from original blue route [96,165,250]
+    // and from the red exclusion zone
     return new PathLayer<{ path: Coord[] }>({
       id: 'exit-route',
-      data: [{ path: [dp, target] }],
+      data: segments,
       getPath: d => d.path,
-      getColor: [250, 204, 21, 255],
-      getWidth: 4,
+      getColor: [0, 210, 190, 255], // Teal/cyan
+      getWidth: 5,
       widthUnits: 'pixels',
       capRounded: true,
       pickable: false,
@@ -130,8 +159,8 @@ export function ExitRouteCard({ open, onDismiss, directionLabel, targetOverride 
           </SheetTitle>
           <SheetDescription>
             {isCheckpoint
-              ? 'Follow the yellow line to reach your bounty checkpoint and earn 50 Google Points.'
-              : 'The map shows the nearest exit path. Follow the line to clear the ambulance corridor.'}
+              ? 'Follow the teal line to reach your bounty checkpoint and earn 50 points.'
+              : 'The map shows the nearest exit path. Follow the teal line to clear the ambulance corridor.'}
           </SheetDescription>
         </SheetHeader>
         {directionLabel ? (

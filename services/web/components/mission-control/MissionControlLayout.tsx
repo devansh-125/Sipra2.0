@@ -6,6 +6,8 @@ import dynamic from 'next/dynamic';
 import TripPanel from './TripPanel';
 import StatusBar from './StatusBar';
 import HandoffOverlay from './HandoffOverlay';
+import DriverPovOverlay from './DriverPovOverlay';
+import RerouteStatusPanel from './RerouteStatusPanel';
 import { getTrip } from '../../lib/api';
 import type { GeoPoint } from '../../lib/types';
 
@@ -25,6 +27,7 @@ export default function MissionControlLayout() {
 
   const [origin, setOrigin] = useState<GeoPoint | undefined>(undefined);
   const [destination, setDestination] = useState<GeoPoint | undefined>(undefined);
+  const [povOpen, setPovOpen] = useState(false);
 
   useEffect(() => {
     if (!tripId) return;
@@ -41,11 +44,14 @@ export default function MissionControlLayout() {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-background">
-      <StatusBar />
+      <StatusBar povOpen={povOpen} onTogglePov={() => setPovOpen(o => !o)} />
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-80 shrink-0 border-r border-border bg-card flex flex-col">
+        <aside className="w-80 shrink-0 border-r border-border bg-card flex flex-col overflow-y-auto">
           <TripPanel />
+          <div className="px-4 pb-4">
+            <RerouteStatusPanel />
+          </div>
         </aside>
 
         <main className="relative flex-1 overflow-hidden">
@@ -56,6 +62,14 @@ export default function MissionControlLayout() {
           />
         </main>
       </div>
+
+      <DriverPovOverlay
+        apiKey={apiKey}
+        origin={origin}
+        destination={destination}
+        open={povOpen}
+        onClose={() => setPovOpen(false)}
+      />
 
       <HandoffOverlay />
     </div>

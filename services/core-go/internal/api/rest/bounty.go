@@ -3,6 +3,7 @@ package rest
 import (
 	"time"
 
+	"github.com/devansh-125/sipra/services/core-go/internal/api/ws"
 	"github.com/devansh-125/sipra/services/core-go/internal/bounty"
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
 	pgstore "github.com/devansh-125/sipra/services/core-go/internal/store/postgres"
@@ -12,26 +13,27 @@ import (
 
 // BountyHandler handles the bounty sub-resource endpoints.
 type BountyHandler struct {
-	trips  *pgstore.TripRepo
-	repo   *bounty.Repo
+	trips *pgstore.TripRepo
+	repo  *bounty.Repo
+	hub   *ws.Hub
 }
 
 // NewBountyHandler constructs a BountyHandler.
-func NewBountyHandler(trips *pgstore.TripRepo, repo *bounty.Repo) *BountyHandler {
-	return &BountyHandler{trips: trips, repo: repo}
+func NewBountyHandler(trips *pgstore.TripRepo, repo *bounty.Repo, hub *ws.Hub) *BountyHandler {
+	return &BountyHandler{trips: trips, repo: repo, hub: hub}
 }
 
 // createBountyRequest is the JSON body for POST /api/v1/trips/:id/bounties.
 type createBountyRequest struct {
-	DriverRef        string   `json:"driver_ref"`
-	PartnerID        *string  `json:"partner_id,omitempty"`
-	BaseAmountPoints int      `json:"base_amount_points"`
-	CorridorLengthM  float64  `json:"corridor_length_m"`
-	DeviationM       float64  `json:"deviation_m"`
-	CheckpointLat    float64  `json:"checkpoint_lat"`
-	CheckpointLng    float64  `json:"checkpoint_lng"`
-	CheckpointRadius int      `json:"checkpoint_radius_m"`
-	ExpiresAt        string   `json:"expires_at"` // RFC3339
+	DriverRef        string  `json:"driver_ref"`
+	PartnerID        *string `json:"partner_id,omitempty"`
+	BaseAmountPoints int     `json:"base_amount_points"`
+	CorridorLengthM  float64 `json:"corridor_length_m"`
+	DeviationM       float64 `json:"deviation_m"`
+	CheckpointLat    float64 `json:"checkpoint_lat"`
+	CheckpointLng    float64 `json:"checkpoint_lng"`
+	CheckpointRadius int     `json:"checkpoint_radius_m"`
+	ExpiresAt        string  `json:"expires_at"` // RFC3339
 }
 
 // CreateBounty handles POST /api/v1/trips/:id/bounties.
@@ -107,6 +109,14 @@ func (h *BountyHandler) ClaimBounty(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
 	}
 
+	// Read back the bounty to get driver_ref and trip_id for the broadcast.
+	b, err := h.repo.GetByID(c.Context(), id)
+	if err != nil {
+		log.Warn().Err(err).Str("bounty_id", string(id)).Msg("claim bounty: read-back failed (broadcast skipped)")
+	} else {
+		h.hub.BroadcastRerouteStatus(b.DriverRef, string(b.TripID), "rerouting", string(b.ID), 0)
+	}
+
 	log.Info().Str("bounty_id", string(id)).Msg("bounty claimed")
 	return c.JSON(fiber.Map{"bounty_id": string(id), "status": string(domain.BountyStatusClaimed)})
 }
@@ -133,6 +143,14 @@ func (h *BountyHandler) VerifyBounty(c *fiber.Ctx) error {
 	if err := h.repo.Verify(c.Context(), id, req.PingLat, req.PingLng); err != nil {
 		log.Error().Err(err).Str("bounty_id", string(id)).Msg("verify bounty: failed")
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// Read back the verified bounty to broadcast the completion with points.
+	b, err := h.repo.GetByID(c.Context(), id)
+	if err != nil {
+		log.Warn().Err(err).Str("bounty_id", string(id)).Msg("verify bounty: read-back failed (broadcast skipped)")
+	} else {
+		h.hub.BroadcastRerouteStatus(b.DriverRef, string(b.TripID), "completed", string(b.ID), b.AmountPoints)
 	}
 
 	log.Info().Str("bounty_id", string(id)).Msg("bounty verified")

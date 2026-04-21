@@ -64,7 +64,7 @@ export interface HandoffInitiatedPayload {
   predicted_eta_seconds: number;
 }
 
-export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE' | 'HANDOFF_INITIATED' | 'FLEET_UPDATE';
+export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE' | 'HANDOFF_INITIATED' | 'FLEET_UPDATE' | 'REROUTE_STATUS';
 
 export interface FleetUpdatePayload {
   fleet: FleetVehicle[];
@@ -73,14 +73,25 @@ export interface FleetUpdatePayload {
 export interface WSEnvelope {
   type: WSMessageType;
   timestamp: string;
-  payload: GPSUpdatePayload | CorridorUpdatePayload | HandoffInitiatedPayload | FleetUpdatePayload | FleetVehicle[];
+  payload: GPSUpdatePayload | CorridorUpdatePayload | HandoffInitiatedPayload | FleetUpdatePayload | FleetVehicle[] | RerouteStatusPayload;
 }
+
+export type RerouteState = 'rerouting' | 'completed' | 'failed';
 
 export interface FleetVehicle {
   id: string;
   lat: number;
   lng: number;
   evading: boolean;
+  reroute_status?: RerouteState | null;
+}
+
+export interface RerouteStatusPayload {
+  driver_ref: string;
+  trip_id: string;
+  status: RerouteState;
+  bounty_id?: string;
+  amount_points?: number;
 }
 
 // -----------------------------------------------------------------------------

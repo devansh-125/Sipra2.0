@@ -179,7 +179,7 @@ func main() {
 	tripHandler := rest.NewTripHandler(tripRepo)
 	pingHandler := rest.NewPingHandler(pingCache, hub)
 	bountyRepo := bounty.NewRepo(pool)
-	bountyHandler := rest.NewBountyHandler(tripRepo, bountyRepo)
+	bountyHandler := rest.NewBountyHandler(tripRepo, bountyRepo, hub)
 	chaosHandler := rest.NewChaosHandler(hub, pingCache, tripRepo, pingRepo, cfg.ChaosEnabled)
 
 	v1 := app.Group("/api/v1")

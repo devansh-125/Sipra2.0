@@ -81,7 +81,7 @@ function NormalCard({ tripId }: { tripId: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// INSIDE_ZONE state card
+// INSIDE_ZONE state card — "Reroute and earn reward?"
 // ---------------------------------------------------------------------------
 function InsideZoneCard({ onShowExitRoute }: { onShowExitRoute: () => void }) {
   return (
@@ -91,13 +91,13 @@ function InsideZoneCard({ onShowExitRoute }: { onShowExitRoute: () => void }) {
           <Badge className="bg-amber-500 text-black border-0 text-xs">Corridor active</Badge>
         </div>
         <CardTitle className="text-base mt-2 text-red-300">
-          Priority Clearance Requested — Ambulance corridor active
+          Reroute and earn reward?
         </CardTitle>
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground mb-4">
-          An emergency ambulance corridor is active in your area. Please yield and move
-          to the nearest clear road immediately.
+          An emergency ambulance corridor is active in your area. Accept the reroute
+          to earn +50 points for clearing the corridor.
         </p>
         <Button
           onClick={onShowExitRoute}
@@ -107,6 +107,53 @@ function InsideZoneCard({ onShowExitRoute }: { onShowExitRoute: () => void }) {
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RerouteStatusBadge — persistent visual badge tied to lifecycle state
+// ---------------------------------------------------------------------------
+function RerouteStatusBadge({
+  rerouteStatus,
+}: {
+  rerouteStatus: 'rerouting' | 'completed' | 'failed' | null;
+}) {
+  if (!rerouteStatus) return null;
+
+  const config = {
+    rerouting: {
+      bg: 'bg-amber-500/15',
+      border: 'border-amber-500/40',
+      dot: 'bg-amber-400',
+      text: 'text-amber-300',
+      label: 'Rerouting',
+      pulse: true,
+    },
+    completed: {
+      bg: 'bg-green-500/15',
+      border: 'border-green-500/40',
+      dot: 'bg-green-400',
+      text: 'text-green-300',
+      label: 'Completed',
+      pulse: false,
+    },
+    failed: {
+      bg: 'bg-red-500/15',
+      border: 'border-red-500/40',
+      dot: 'bg-red-400',
+      text: 'text-red-300',
+      label: 'Failed',
+      pulse: false,
+    },
+  }[rerouteStatus];
+
+  return (
+    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${config.bg} ${config.border}`}>
+      <div className={`w-2 h-2 rounded-full ${config.dot} ${config.pulse ? 'animate-pulse' : ''}`} />
+      <span className={`text-xs font-semibold uppercase tracking-wider ${config.text}`}>
+        {config.label}
+      </span>
+    </div>
   );
 }
 
@@ -207,7 +254,7 @@ export default function DriverShell({ tripId }: { tripId: string }) {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
-      {/* Bounty modal (OFFERED dialog / CLAIMED strip / VERIFIED overlay) */}
+      {/* Bounty modal (OFFERED dialog / CLAIMED strip / VERIFIED overlay / EXPIRED overlay) */}
       <BountyModal lifecycle={bountyLC} wallet={wallet} tripId={tripId} />
 
       {/* Top: 40vh map — exclusion polygon + driver dot, no ambulance */}
@@ -228,6 +275,13 @@ export default function DriverShell({ tripId }: { tripId: string }) {
           </Map>
         </APIProvider>
       </div>
+
+      {/* Reroute status badge — shows Rerouting / Completed / Failed */}
+      {bountyLC.rerouteStatus && (
+        <div className="px-4 py-2 bg-card/60 border-b border-border flex items-center justify-center">
+          <RerouteStatusBadge rerouteStatus={bountyLC.rerouteStatus} />
+        </div>
+      )}
 
       {/* Middle: state-driven card */}
       <div className="flex-1 overflow-auto p-4 min-h-0">

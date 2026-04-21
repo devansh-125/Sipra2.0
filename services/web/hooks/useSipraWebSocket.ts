@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Geometry } from 'geojson';
-import type { CorridorUpdatePayload, GPSUpdatePayload, HandoffInitiatedPayload, WSEnvelope, FleetVehicle, FleetUpdatePayload } from '../lib/types';
+import type { CorridorUpdatePayload, GPSUpdatePayload, HandoffInitiatedPayload, WSEnvelope, FleetVehicle, FleetUpdatePayload, RerouteStatusPayload, RerouteState } from '../lib/types';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -19,6 +19,8 @@ export interface SipraWSState {
   corridorGeoJSON: Geometry | null;
   handoffState: HandoffInitiatedPayload | null;
   fleet: FleetVehicle[];
+  /** Map of driver_ref → latest reroute status update */
+  rerouteStatuses: Record<string, { status: RerouteState; tripId: string; bountyId?: string; amountPoints?: number; timestamp: number }>;
   status: ConnectionStatus;
   lastMessageAt: number | null;
   lastEnvelopeType: string | null;
@@ -45,6 +47,7 @@ export function useSipraWebSocket(
     corridorGeoJSON: null,
     handoffState: null,
     fleet: [],
+    rerouteStatuses: {},
     status: 'connecting',
     lastMessageAt: null,
     lastEnvelopeType: null,
@@ -118,6 +121,22 @@ export function useSipraWebSocket(
             const payload = msg.payload as FleetUpdatePayload | FleetVehicle[];
             const fleet = Array.isArray(payload) ? payload : (payload as FleetUpdatePayload).fleet || [];
             return { ...base, fleet };
+          }
+          if (msg.type === 'REROUTE_STATUS') {
+            const p = msg.payload as RerouteStatusPayload;
+            return {
+              ...base,
+              rerouteStatuses: {
+                ...s.rerouteStatuses,
+                [p.driver_ref]: {
+                  status: p.status,
+                  tripId: p.trip_id,
+                  bountyId: p.bounty_id,
+                  amountPoints: p.amount_points,
+                  timestamp: now,
+                },
+              },
+            };
           }
           return base;
         });

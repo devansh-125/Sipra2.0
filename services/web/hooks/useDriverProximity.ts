@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
-import distance from '@turf/distance';
 import type { Geometry, MultiPolygon, Point, Polygon, Position } from 'geojson';
 
 export type ProximityState = 'NORMAL' | 'INSIDE_ZONE';
@@ -13,6 +12,31 @@ export interface DriverProximityResult {
 interface LatLng {
   lat: number;
   lng: number;
+}
+
+// Local ENU (equirectangular) projection — accurate within <10 km scale,
+// which is well within the 2 km corridor we're measuring against.
+function pointToSegmentMeters(
+  p: LatLng,
+  a: Position,
+  b: Position,
+): number {
+  const latRad = (p.lat * Math.PI) / 180;
+  const mPerLat = 111_132;
+  const mPerLng = 111_132 * Math.cos(latRad);
+  const px = p.lng * mPerLng;
+  const py = p.lat * mPerLat;
+  const ax = a[0] * mPerLng;
+  const ay = a[1] * mPerLat;
+  const bx = b[0] * mPerLng;
+  const by = b[1] * mPerLat;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  const t = lenSq > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq)) : 0;
+  const fx = ax + t * dx;
+  const fy = ay + t * dy;
+  return Math.hypot(px - fx, py - fy);
 }
 
 export function useDriverProximity(
@@ -38,13 +62,9 @@ export function useDriverProximity(
 
     let minDistM: number | null = null;
     for (const ring of rings) {
-      for (const v of ring) {
-        const d = distance(pt, { type: 'Point', coordinates: [v[0], v[1]] } as Point, {
-          units: 'meters',
-        });
-        if (minDistM === null || d < minDistM) {
-          minDistM = d;
-        }
+      for (let i = 0; i < ring.length - 1; i++) {
+        const d = pointToSegmentMeters(position, ring[i], ring[i + 1]);
+        if (minDistM === null || d < minDistM) minDistM = d;
       }
     }
 

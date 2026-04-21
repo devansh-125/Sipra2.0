@@ -9,11 +9,49 @@ import type { FleetVehicle } from '../../lib/types';
 const easeOut = (t: number): number => t * (2 - t);
 
 /**
+ * Resolves fill and line colours from the vehicle's reroute_status.
+ * Priority: reroute_status > evading flag > default blue.
+ */
+function vehicleFillColor(v: FleetVehicle): [number, number, number, number] {
+  if (v.reroute_status === 'completed') return [34, 197, 94, 230];   // green
+  if (v.reroute_status === 'failed')    return [239, 68, 68, 230];   // red
+  if (v.reroute_status === 'rerouting') return [255, 165, 0, 230];   // amber
+  if (v.evading)                        return [255, 165, 0, 230];   // amber (legacy)
+  return [30, 120, 255, 200]; // default blue
+}
+
+function vehicleLineColor(v: FleetVehicle): [number, number, number, number] {
+  if (v.reroute_status === 'completed') return [74, 222, 128, 255];  // green ring
+  if (v.reroute_status === 'failed')    return [252, 100, 100, 255]; // red ring
+  if (v.reroute_status === 'rerouting') return [255, 200, 0, 255];   // amber ring
+  if (v.evading)                        return [255, 200, 0, 255];   // amber ring (legacy)
+  return [80, 160, 255, 180]; // default blue ring
+}
+
+function vehicleRadius(v: FleetVehicle): number {
+  if (v.reroute_status === 'completed') return 16;
+  if (v.reroute_status === 'failed')    return 14;
+  if (v.reroute_status === 'rerouting') return 18;
+  if (v.evading)                        return 18;
+  return 10;
+}
+
+function vehicleLineWidth(v: FleetVehicle): number {
+  if (v.reroute_status) return 3;
+  if (v.evading) return 2;
+  return 1;
+}
+
+/**
  * Returns a deck.gl ScatterplotLayer representing the partner fleet.
  *
  * - Normal vehicles render as small blue circles.
- * - Evading vehicles (inside the exclusion corridor) render as larger amber
- *   circles so the "get out of the way" behaviour is immediately visible.
+ * - Vehicles with reroute_status render with distinct colours:
+ *   - "rerouting": larger amber circles with amber ring
+ *   - "completed": green circles with green ring
+ *   - "failed": red circles with red ring
+ * - Legacy evading vehicles (inside the exclusion corridor) render as larger
+ *   amber circles for backwards compatibility.
  * - Deck.gl's built-in transition system interpolates position, colour, and
  *   radius changes so coordinate updates from the simulator look smooth.
  */
@@ -24,10 +62,10 @@ export function useFleetLayer(vehicles: FleetVehicle[]): ScatterplotLayer<FleetV
         id: 'fleet-swarm',
         data: vehicles,
         getPosition: v => [v.lng, v.lat],
-        getRadius: v => (v.evading ? 18 : 10),
-        getFillColor: v => (v.evading ? [255, 165, 0, 230] : [30, 120, 255, 200]),
-        getLineColor: v => (v.evading ? [255, 200, 0, 255] : [80, 160, 255, 180]),
-        getLineWidth: v => (v.evading ? 2 : 1),
+        getRadius: v => vehicleRadius(v),
+        getFillColor: v => vehicleFillColor(v),
+        getLineColor: v => vehicleLineColor(v),
+        getLineWidth: v => vehicleLineWidth(v),
         lineWidthUnits: 'pixels',
         radiusUnits: 'pixels',
         stroked: true,
@@ -39,10 +77,10 @@ export function useFleetLayer(vehicles: FleetVehicle[]): ScatterplotLayer<FleetV
           getRadius: { duration: 200 },
         },
         updateTriggers: {
-          getRadius: vehicles.map(v => v.evading),
-          getFillColor: vehicles.map(v => v.evading),
-          getLineColor: vehicles.map(v => v.evading),
-          getLineWidth: vehicles.map(v => v.evading),
+          getRadius: vehicles.map(v => `${v.evading}-${v.reroute_status}`),
+          getFillColor: vehicles.map(v => `${v.evading}-${v.reroute_status}`),
+          getLineColor: vehicles.map(v => `${v.evading}-${v.reroute_status}`),
+          getLineWidth: vehicles.map(v => `${v.evading}-${v.reroute_status}`),
         },
       }),
     [vehicles],

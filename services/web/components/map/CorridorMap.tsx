@@ -71,6 +71,11 @@ function MapLegend({ fleetCount, evadingCount }: { fleetCount: number; evadingCo
       <div style={{ color: '#1e78ff' }}>● FLEET  ({fleetCount} vehicles)</div>
       <div style={{ color: '#ffa500' }}>● EVADING  ({evadingCount} rerouting)</div>
       <div style={{ color: '#ffffff' }}>◎ AMBULANCE</div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', margin: '4px 0' }} />
+      <div style={{ color: '#ffa500' }}>◉ REROUTING</div>
+      <div style={{ color: '#22c55e' }}>◉ COMPLETED</div>
+      <div style={{ color: '#ef4444' }}>◉ FAILED</div>
+      <div style={{ color: '#00d2be' }}>━ REROUTE PATH</div>
     </div>
   );
 }
