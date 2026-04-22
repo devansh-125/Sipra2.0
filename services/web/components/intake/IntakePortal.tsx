@@ -69,7 +69,7 @@ export default function IntakePortal() {
   }
 
   function handleDemoLaunch() {
-    router.push('/dashboard');
+    router.push('/demo/corridor-sim');
   }
 
   return (

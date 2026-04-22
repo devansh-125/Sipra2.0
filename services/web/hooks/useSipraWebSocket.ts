@@ -41,6 +41,7 @@ declare global {
 export function useSipraWebSocket(
   url: string = process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/dashboard',
 ): SipraWSState {
+  const wsEnabled = process.env.NEXT_PUBLIC_ENABLE_BACKEND_WS === 'true';
   const [state, setState] = useState<Omit<SipraWSState, 'clearHandoff'>>({
     ambulanceLat: null,
     ambulanceLng: null,
@@ -48,7 +49,7 @@ export function useSipraWebSocket(
     handoffState: null,
     fleet: [],
     rerouteStatuses: {},
-    status: 'connecting',
+    status: wsEnabled ? 'connecting' : 'disconnected',
     lastMessageAt: null,
     lastEnvelopeType: null,
     recentEvents: [],
@@ -159,6 +160,7 @@ export function useSipraWebSocket(
   }, [url]);
 
   useEffect(() => {
+    if (!wsEnabled) return;
     mountedRef.current = true;
     connect();
     return () => {
@@ -166,7 +168,7 @@ export function useSipraWebSocket(
       wsRef.current?.close();
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [connect]);
+  }, [connect, wsEnabled]);
 
   // DEV-only helper: window.__fakeHandoff() dispatches a synthetic HANDOFF_INITIATED payload.
   useEffect(() => {

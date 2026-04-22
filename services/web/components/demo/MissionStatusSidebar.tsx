@@ -34,7 +34,7 @@ function getUrgency(progress: number): UrgencyLevel {
 }
 
 const URGENCY_COLORS: Record<UrgencyLevel, { bar: string; badge: string; badgeBg: string }> = {
-  normal:   { bar: '#22c55e', badge: '#22c55e', badgeBg: 'rgba(34,197,94,0.15)' },
+  normal: { bar: '#22c55e', badge: '#22c55e', badgeBg: 'rgba(34,197,94,0.15)' },
   elevated: { bar: '#f59e0b', badge: '#f59e0b', badgeBg: 'rgba(245,158,11,0.15)' },
   critical: { bar: '#ef4444', badge: '#ef4444', badgeBg: 'rgba(239,68,68,0.15)' },
 };
@@ -47,12 +47,15 @@ interface MissionStatusSidebarProps {
   sim: CorridorSimState;
   speed: number;
   onSpeedChange: (s: number) => void;
+  /** Called when the user clicks "View Reward Summary". */
+  onViewRewards?: () => void;
 }
 
 export default function MissionStatusSidebar({
   sim,
   speed,
   onSpeedChange,
+  onViewRewards,
 }: MissionStatusSidebarProps) {
   const [tick, setTick] = useState(0);
 
@@ -68,6 +71,12 @@ export default function MissionStatusSidebar({
   const uc = URGENCY_COLORS[urgency];
   const etaMin = Math.round((sim.etaSeconds * (1 - sim.progress)) / 60);
   const distKm = (sim.distanceMeters / 1000).toFixed(1);
+
+  /** Button is enabled when trip finishes (progress=1) or golden hour expires. */
+  const tripDone = sim.progress >= 1 || remainingMs <= 0;
+
+  // tick is used only to force a re-render each second for the countdown
+  void tick;
 
   return (
     <div
@@ -298,7 +307,62 @@ export default function MissionStatusSidebar({
               </button>
             ))}
           </div>
-        </div>
+
+          {/* Emergency Service button */}
+          <button
+            id="sidebar-emergency-btn"
+            onClick={() => sim.activateEmergency()}
+            disabled={sim.isEmergencyMode}
+            title={sim.isEmergencyMode ? 'Emergency mode already active' : 'Activate drone delivery mode'}
+            style={{
+              marginTop: 10,
+              width: '100%',
+              padding: '9px 0',
+              borderRadius: 10,
+              border: sim.isEmergencyMode
+                ? '1px solid rgba(139,92,246,0.25)'
+                : '1px solid rgba(139,92,246,0.6)',
+              background: sim.isEmergencyMode
+                ? 'rgba(139,92,246,0.08)'
+                : 'linear-gradient(135deg, #6d28d9, #a855f7)',
+              color: sim.isEmergencyMode ? 'rgba(167,139,250,0.45)' : '#fff',
+              fontWeight: 700,
+              fontSize: 11,
+              cursor: sim.isEmergencyMode ? 'not-allowed' : 'pointer',
+              letterSpacing: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              transition: 'all 0.2s',
+              boxShadow: sim.isEmergencyMode ? 'none' : '0 0 12px rgba(139,92,246,0.4)',
+            }}
+          >
+            🚁 Emergency Service
+          </button>
+
+          {/* Emergency phase status label */}
+          {sim.isEmergencyMode && (
+            <div style={{
+              marginTop: 8,
+              padding: '8px 10px',
+              borderRadius: 8,
+              background: 'rgba(139,92,246,0.12)',
+              border: '1px solid rgba(139,92,246,0.25)',
+              fontSize: 10,
+              fontWeight: 700,
+              color: '#c4b5fd',
+              textAlign: 'center',
+              letterSpacing: 0.5,
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}>
+              {sim.emergencyPhase === 'ambulance-to-midpoint' && '🚑 Ambulance racing to pickup point...'}
+              {sim.emergencyPhase === 'transfer' && '⚡ Transferring organ to drone!'}
+              {sim.emergencyPhase === 'drone-flight' && '🚁 Drone delivering to hospital...'}
+              {sim.emergencyPhase === 'arrived' && '✅ Drone arrived at destination!'}
+            </div>
+          )}
+        </div>{/* end Simulation card */}
 
         {/* ── Route Source ──────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 2px' }}>
@@ -307,9 +371,42 @@ export default function MissionStatusSidebar({
             {sim.routePoints.length > 0 ? 'Route loaded' : 'Loading…'}
           </span>
         </div>
-      </div>
 
-      <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.5 } }`}</style>
+        {/* ── View Reward Summary ───────────────────── */}
+        <button
+          id="view-reward-summary-btn"
+          onClick={tripDone && onViewRewards ? onViewRewards : undefined}
+          disabled={!tripDone}
+          title={tripDone ? 'Open billing summary' : 'Available after trip completes or timer expires'}
+          style={{
+            width: '100%',
+            padding: '11px 0',
+            borderRadius: 10,
+            border: tripDone
+              ? '1px solid rgba(52, 211, 153, 0.45)'
+              : '1px solid rgba(255,255,255,0.08)',
+            background: tripDone
+              ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)'
+              : 'rgba(255,255,255,0.04)',
+            color: tripDone ? '#fff' : 'rgba(255,255,255,0.25)',
+            fontWeight: 700,
+            fontSize: 12,
+            letterSpacing: 0.5,
+            cursor: tripDone ? 'pointer' : 'not-allowed',
+            transition: 'all 0.25s ease',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            boxShadow: tripDone ? '0 0 16px rgba(16, 185, 129, 0.35)' : 'none',
+          }}
+        >
+          <span style={{ fontSize: 14 }}>{tripDone ? '💸' : '🔒'}</span>
+          View Reward Summary
+        </button>
+
+        <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.5 } }`}</style>
+      </div>
     </div>
   );
 }

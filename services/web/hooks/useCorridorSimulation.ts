@@ -53,6 +53,7 @@ const PRERECORDED_DURATION_TEXT = '42 mins';
 // Types
 // ---------------------------------------------------------------------------
 export type DriverStatus = 'safe' | 'alerted' | 'evading';
+export type EmergencyPhase = 'none' | 'ambulance-to-midpoint' | 'transfer' | 'drone-flight' | 'arrived';
 
 export interface SimDriver {
   id: string;
@@ -93,6 +94,17 @@ export interface CorridorSimState {
   driversAlerted: number;
   /** Number of drivers currently visible (within 4km culling radius). */
   driversVisible: number;
+  // ── Emergency drone-delivery mode ─────────────────────────────────────────
+  isEmergencyMode: boolean;
+  emergencyPhase: EmergencyPhase;
+  /** Drone position, linearly interpolated from midpoint → destination. */
+  dronePosition: GeoPoint;
+  droneProgress: number;
+  /** True for ~3.5 s during the organ-transfer popup. */
+  showTransferPopup: boolean;
+  /** Geographic midpoint of the primary route. */
+  midpoint: GeoPoint | null;
+  activateEmergency: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,8 +121,8 @@ function haversineKm(a: GeoPoint, b: GeoPoint): number {
   const s =
     Math.sin(dLat / 2) ** 2 +
     Math.cos(a.lat * DEG_TO_RAD) *
-      Math.cos(b.lat * DEG_TO_RAD) *
-      Math.sin(dLng / 2) ** 2;
+    Math.cos(b.lat * DEG_TO_RAD) *
+    Math.sin(dLng / 2) ** 2;
   return 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
@@ -121,8 +133,8 @@ function bearing(a: GeoPoint, b: GeoPoint): number {
   const x =
     Math.cos(a.lat * DEG_TO_RAD) * Math.sin(b.lat * DEG_TO_RAD) -
     Math.sin(a.lat * DEG_TO_RAD) *
-      Math.cos(b.lat * DEG_TO_RAD) *
-      Math.cos(dLng);
+    Math.cos(b.lat * DEG_TO_RAD) *
+    Math.cos(dLng);
   return Math.atan2(y, x);
 }
 
@@ -137,7 +149,7 @@ function translateKm(
   const lng1 = point.lng * DEG_TO_RAD;
   const lat2 = Math.asin(
     Math.sin(lat1) * Math.cos(angDist) +
-      Math.cos(lat1) * Math.sin(angDist) * Math.cos(bearingRad),
+    Math.cos(lat1) * Math.sin(angDist) * Math.cos(bearingRad),
   );
   const lng2 =
     lng1 +
@@ -253,6 +265,14 @@ export function useCorridorSimulation(): CorridorSimState {
   const [drivers, setDrivers] = useState<SimDriver[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const speedRef = useRef(1);
+
+  // ── Emergency mode state ──────────────────────────────────────────────────
+  const [isEmergencyMode, setIsEmergencyMode] = useState(false);
+  const [emergencyPhase, setEmergencyPhase] = useState<EmergencyPhase>('none');
+  const [droneProgress, setDroneProgress] = useState(0);
+  const [showTransferPopup, setShowTransferPopup] = useState(false);
+  /** Mutable ref so tick callback sees the latest phase without stale closure. */
+  const emergencyPhaseRef = useRef<EmergencyPhase>('none');
 
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const idxRef = useRef(0); // mutable mirror of ambulanceIdx for the interval
@@ -370,10 +390,31 @@ export function useCorridorSimulation(): CorridorSimState {
     return routePoints[idx];
   }, [routePoints, ambulanceIdx]);
 
+  /** Geographic midpoint of the primary route (used as drone pickup point). */
+  const midpoint: GeoPoint | null = useMemo(() => {
+    if (routePoints.length === 0) return null;
+    return routePoints[Math.floor((routePoints.length - 1) / 2)];
+  }, [routePoints]);
+
+  /** Drone position: linear interpolation from midpoint → destination. */
+  const dronePosition: GeoPoint = useMemo(() => {
+    if (!midpoint || routePoints.length === 0) return MEDANTA_HOSPITAL;
+    const dest = routePoints[routePoints.length - 1];
+    return {
+      lat: midpoint.lat + (dest.lat - midpoint.lat) * droneProgress,
+      lng: midpoint.lng + (dest.lng - midpoint.lng) * droneProgress,
+    };
+  }, [midpoint, droneProgress, routePoints]);
+
   const progress = useMemo(() => {
     if (routePoints.length <= 1) return 0;
-    return ambulanceIdx / (routePoints.length - 1);
-  }, [ambulanceIdx, routePoints.length]);
+    const ambFraction = ambulanceIdx / (routePoints.length - 1);
+    // During drone flight, blend ambulance half (0.5) + drone progress (0→0.5)
+    if (isEmergencyMode && (emergencyPhase === 'drone-flight' || emergencyPhase === 'arrived')) {
+      return 0.5 + 0.5 * droneProgress;
+    }
+    return ambFraction;
+  }, [ambulanceIdx, routePoints.length, isEmergencyMode, emergencyPhase, droneProgress]);
 
   // ── Helper: fetch a single escape route for a driver (fire-and-forget) ────
   const fetchEscapeRoute = useCallback(
@@ -440,12 +481,42 @@ export function useCorridorSimulation(): CorridorSimState {
   const tick = useCallback(() => {
     if (routePoints.length === 0) return;
 
+    const phase = emergencyPhaseRef.current;
+
+    // ── Drone flight: advance drone, skip ambulance & drivers ─────────────
+    if (phase === 'drone-flight') {
+      const droneStep = Math.max(0.012, 0.012 * speedRef.current);
+      setDroneProgress((prev) => {
+        const next = Math.min(prev + droneStep, 1);
+        if (next >= 1) {
+          setEmergencyPhase('arrived');
+          emergencyPhaseRef.current = 'arrived';
+          setIsRunning(false);
+        }
+        return next;
+      });
+      return;
+    }
+
     // Advance ambulance — with hundreds of points, each step is a smooth curve
     const speed = speedRef.current;
     const stepsPerTick = Math.max(1, Math.round(speed));
-    const nextIdx = Math.min(idxRef.current + stepsPerTick, routePoints.length - 1);
+    // In emergency mode, cap ambulance at the midpoint index
+    const midpointIdx = Math.floor((routePoints.length - 1) / 2);
+    const upperBound = (phase === 'ambulance-to-midpoint')
+      ? midpointIdx
+      : routePoints.length - 1;
+    const nextIdx = Math.min(idxRef.current + stepsPerTick, upperBound);
     idxRef.current = nextIdx;
     setAmbulanceIdx(nextIdx);
+
+    // ── Emergency: ambulance reached midpoint → trigger transfer ──────────
+    if (phase === 'ambulance-to-midpoint' && nextIdx >= midpointIdx) {
+      setEmergencyPhase('transfer');
+      emergencyPhaseRef.current = 'transfer';
+      setIsRunning(false);
+      return;
+    }
 
     const ambPos = routePoints[nextIdx];
 
@@ -555,8 +626,8 @@ export function useCorridorSimulation(): CorridorSimState {
       fetchEscapeRoute(req.id, req.pos, req.target);
     }
 
-    // Auto-stop at end
-    if (nextIdx >= routePoints.length - 1) {
+    // Auto-stop at end (normal mode only)
+    if (nextIdx >= routePoints.length - 1 && phase === 'none') {
       setIsRunning(false);
     }
   }, [routePoints, fetchEscapeRoute]);
@@ -575,6 +646,19 @@ export function useCorridorSimulation(): CorridorSimState {
       if (tickRef.current) clearInterval(tickRef.current);
     };
   }, [isRunning, tick]);
+
+  // ── 4b. Emergency transfer phase: show popup, then launch drone ───────────
+  useEffect(() => {
+    if (emergencyPhase !== 'transfer') return;
+    setShowTransferPopup(true);
+    const timer = setTimeout(() => {
+      setShowTransferPopup(false);
+      setEmergencyPhase('drone-flight');
+      emergencyPhaseRef.current = 'drone-flight';
+      setIsRunning(true); // restart interval for drone animation
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [emergencyPhase]);
 
   // ── 5. Controls ───────────────────────────────────────────────────────────
   const start = useCallback(() => {
@@ -595,6 +679,12 @@ export function useCorridorSimulation(): CorridorSimState {
     setIsRunning(false);
     idxRef.current = 0;
     setAmbulanceIdx(0);
+    // Reset emergency mode
+    setIsEmergencyMode(false);
+    setEmergencyPhase('none');
+    emergencyPhaseRef.current = 'none';
+    setDroneProgress(0);
+    setShowTransferPopup(false);
     // Clear all escape route caches
     escapeRequestedRef.current.clear();
     escapeRoutesRef.current.clear();
@@ -616,6 +706,23 @@ export function useCorridorSimulation(): CorridorSimState {
   const setSpeed = useCallback((multiplier: number) => {
     speedRef.current = multiplier;
   }, []);
+
+  const activateEmergency = useCallback(() => {
+    if (routePoints.length === 0) return;
+    const midIdx = Math.floor((routePoints.length - 1) / 2);
+    setIsEmergencyMode(true);
+    setDroneProgress(0);
+    if (idxRef.current >= midIdx) {
+      // Already at/past midpoint — jump straight to transfer
+      setEmergencyPhase('transfer');
+      emergencyPhaseRef.current = 'transfer';
+      setIsRunning(false);
+    } else {
+      setEmergencyPhase('ambulance-to-midpoint');
+      emergencyPhaseRef.current = 'ambulance-to-midpoint';
+      setIsRunning(true); // ensure ambulance is moving toward midpoint
+    }
+  }, [routePoints]);
 
   // ── 6. Stats ──────────────────────────────────────────────────────────────
   const driversInZone = useMemo(
@@ -650,5 +757,13 @@ export function useCorridorSimulation(): CorridorSimState {
     driversInZone,
     driversAlerted,
     driversVisible,
+    // Emergency drone-delivery mode
+    isEmergencyMode,
+    emergencyPhase,
+    dronePosition,
+    droneProgress,
+    showTransferPopup,
+    midpoint,
+    activateEmergency,
   };
 }

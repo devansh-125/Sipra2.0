@@ -24,6 +24,7 @@ const REROUTE_CHECK_INTERVAL_MS = 60_000; // check for ETA-delta re-routing ever
 export interface MissionRouteState {
   polyline: GeoPoint[];
   etaSeconds: number;
+  distanceMeters: number;
   routeSource: RouteSource;
   /** True while an API request is in flight. */
   isRerouting: boolean;
@@ -38,6 +39,7 @@ export interface MissionRouteState {
 const INITIAL: Omit<MissionRouteState, 'reroute' | 'simulateBlockage'> = {
   polyline: [],
   etaSeconds: 0,
+  distanceMeters: 0,
   routeSource: 'loading',
   isRerouting: false,
   lastFetchedAt: null,
@@ -65,6 +67,7 @@ export function useMissionRoute(
     setState({
       polyline: r.polyline,
       etaSeconds: r.etaSeconds,
+      distanceMeters: r.distanceMeters,
       routeSource: r.routeSource,
       isRerouting: false,
       lastFetchedAt: r.fetchedAt,

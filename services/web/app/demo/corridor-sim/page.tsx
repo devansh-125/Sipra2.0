@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useCorridorSimulation } from '../../../hooks/useCorridorSimulation';
 import { APIProvider } from '@vis.gl/react-google-maps';
@@ -34,9 +35,15 @@ const SimDriverPhone = dynamic(
 
 const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
+// Tender Palm Hospital — destination used by the corridor sim
+const DESTINATION_LAT = 26.8547;
+const DESTINATION_LNG = 80.9180;
+const DESTINATION_NAME = 'Tender Palm Hospital';
+
 export default function CorridorSimPage() {
   const sim = useCorridorSimulation();
   const [speed, setSpeed] = useState(1);
+  const router = useRouter();
 
   const handleSpeedChange = useCallback(
     (s: number) => {
@@ -45,6 +52,18 @@ export default function CorridorSimPage() {
     },
     [sim],
   );
+
+  /** Navigate to the Reward Summary page with trip telemetry as query params. */
+  const handleViewRewards = useCallback(() => {
+    const params = new URLSearchParams({
+      tripId: `demo-trip-${Date.now()}`,
+      distanceMeters: String(sim.distanceMeters || 16800),
+      destinationLat: String(DESTINATION_LAT),
+      destinationLng: String(DESTINATION_LNG),
+      destinationName: DESTINATION_NAME,
+    });
+    router.push(`/demo/rewards-settlement?${params.toString()}`);
+  }, [sim.distanceMeters, router]);
 
   return (
     <>
@@ -60,33 +79,34 @@ export default function CorridorSimPage() {
         />
       </head>
       <APIProvider apiKey={apiKey} libraries={['geometry']}>
-      <div
-        style={{
-          width: '100vw',
-          height: '100vh',
-          overflow: 'hidden',
-          margin: 0,
-          padding: 0,
-          display: 'grid',
-          gridTemplateColumns: '20% 1fr 20%',
-          background: '#0c0c1a',
-        }}
-      >
-        {/* Left Column — Mission Status */}
-        <MissionStatusSidebar
-          sim={sim}
-          speed={speed}
-          onSpeedChange={handleSpeedChange}
-        />
+        <div
+          style={{
+            width: '100vw',
+            height: '100vh',
+            overflow: 'hidden',
+            margin: 0,
+            padding: 0,
+            display: 'grid',
+            gridTemplateColumns: '20% 1fr 20%',
+            background: '#0c0c1a',
+          }}
+        >
+          {/* Left Column — Mission Status */}
+          <MissionStatusSidebar
+            sim={sim}
+            speed={speed}
+            onSpeedChange={handleSpeedChange}
+            onViewRewards={handleViewRewards}
+          />
 
-        {/* Center Column — Corridor Map */}
-        <main style={{ position: 'relative', overflow: 'hidden' }}>
-          <CorridorSimMap apiKey={apiKey} sim={sim} embedded />
-        </main>
+          {/* Center Column — Corridor Map */}
+          <main style={{ position: 'relative', overflow: 'hidden' }}>
+            <CorridorSimMap apiKey={apiKey} sim={sim} embedded />
+          </main>
 
-        {/* Right Column — Driver Phone */}
-        <SimDriverPhone sim={sim} />
-      </div>
+          {/* Right Column — Driver Phone */}
+          <SimDriverPhone sim={sim} />
+        </div>
       </APIProvider>
     </>
   );

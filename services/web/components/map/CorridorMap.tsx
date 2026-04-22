@@ -19,6 +19,7 @@ import type { FleetVehicle, GeoPoint, HandoffInitiatedPayload } from '../../lib/
 // Default viewport: Lucknow — matches the Medanta → Tender Palm route.
 const DEFAULT_CENTER = { lat: 26.82, lng: 80.97 };
 const FLEET_WS_URL = process.env.NEXT_PUBLIC_SIM_WS_URL ?? 'ws://localhost:4001';
+const SIM_WS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SIM_WS === 'true';
 
 // --------------------------------------------------------------------------
 // DeckGLOverlay
@@ -161,6 +162,11 @@ function MapScene({
   // ── Fleet subscribers (port 4001) ─────────────────────────────────────
   const [fleet, setFleet] = useState<FleetVehicle[]>([]);
   useEffect(() => {
+    if (!SIM_WS_ENABLED || !FLEET_WS_URL) {
+      setFleet([]);
+      return;
+    }
+
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
     const connect = () => {

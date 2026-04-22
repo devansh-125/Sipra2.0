@@ -1,6 +1,8 @@
 import type { Bounty, ClaimBountyResponse, CreateBountyRequest, Trip, VerifyBountyResponse } from './types';
+import { FALLBACK_DESTINATION, FALLBACK_ORIGIN } from './routing';
 
 const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_HTTP_URL ?? 'http://localhost:8080';
+const BACKEND_HTTP_ENABLED = process.env.NEXT_PUBLIC_ENABLE_BACKEND_HTTP === 'true';
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -12,7 +14,49 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function getTrip(id: string): Promise<Trip> {
-  return fetchJSON<Trip>(`${BASE_URL}/api/v1/trips/${encodeURIComponent(id)}`);
+  if (!BACKEND_HTTP_ENABLED) {
+    const nowIso = new Date().toISOString();
+    const deadlineIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    return Promise.resolve({
+      id,
+      status: 'InTransit',
+      cargo: {
+        category: 'Organ',
+        description: 'Demo payload (frontend fallback)',
+        tolerance_celsius: 4,
+      },
+      origin: FALLBACK_ORIGIN,
+      destination: FALLBACK_DESTINATION,
+      golden_hour_deadline: deadlineIso,
+      started_at: nowIso,
+      ambulance_id: 'AMB-DEMO-001',
+      hospital_dispatch_id: 'HOSP-DEMO-001',
+      created_at: nowIso,
+      updated_at: nowIso,
+    });
+  }
+
+  return fetchJSON<Trip>(`${BASE_URL}/api/v1/trips/${encodeURIComponent(id)}`).catch(() => {
+    const nowIso = new Date().toISOString();
+    const deadlineIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    return {
+      id,
+      status: 'InTransit',
+      cargo: {
+        category: 'Organ',
+        description: 'Demo payload (frontend fallback)',
+        tolerance_celsius: 4,
+      },
+      origin: FALLBACK_ORIGIN,
+      destination: FALLBACK_DESTINATION,
+      golden_hour_deadline: deadlineIso,
+      started_at: nowIso,
+      ambulance_id: 'AMB-DEMO-001',
+      hospital_dispatch_id: 'HOSP-DEMO-001',
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+  });
 }
 
 export interface CreateTripBody {

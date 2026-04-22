@@ -141,6 +141,7 @@ const PRERECORDED: Record<string, PrerecordedEntry> = {
 // ---------------------------------------------------------------------------
 const CACHE_TTL_MS = 10 * 60 * 1000;      // routes older than 10 min are refetched
 const MIN_REQUEST_INTERVAL_MS = 2_000;    // per-OD rate limit: 1 request / 2s
+const DIRECTIONS_API_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DIRECTIONS_API === 'true';
 
 const cache = new Map<string, ResolvedRoute>();
 const lastRequestAt = new Map<string, number>();
@@ -246,6 +247,14 @@ async function resolveRoute(
   key: string,
   now: number,
 ): Promise<ResolvedRoute> {
+  if (!DIRECTIONS_API_ENABLED) {
+    const pre = loadPrerecorded(key, now);
+    if (pre) {
+      cache.set(key, pre);
+      return pre;
+    }
+  }
+
   // ── Primary path: server proxy → Google Directions API ───────────────────
   try {
     const params = new URLSearchParams({
