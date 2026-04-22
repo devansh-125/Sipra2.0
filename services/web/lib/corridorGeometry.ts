@@ -163,24 +163,5 @@ export function buildCorridorPolygon(
   };
 }
 
-/**
- * Simulated corridor for demo/fallback when no real API polyline is available.
- * Generates a straight-line polyline from origin to destination with `steps`
- * waypoints, then buffers it identically to the real corridor.
- */
-export function buildSimulatedCorridor(
-  origin: GeoPoint,
-  destination: GeoPoint,
-  bufferMeters = 75,
-  steps = 20,
-): Polygon | null {
-  const pts: GeoPoint[] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    pts.push({
-      lat: origin.lat + (destination.lat - origin.lat) * t,
-      lng: origin.lng + (destination.lng - origin.lng) * t,
-    });
-  }
-  return buildCorridorPolygon(pts, bufferMeters);
-}
+// buildSimulatedCorridor() was removed — no straight-line corridor fabrication.
+// Use buildCorridorPolygon() with a real Directions API polyline instead.

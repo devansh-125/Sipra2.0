@@ -16,8 +16,8 @@ import { useAmbulanceAnimation } from '../../hooks/useAmbulanceAnimation';
 import { useHospitalNames } from '../../hooks/useHospitalNames';
 import type { FleetVehicle, GeoPoint, HandoffInitiatedPayload } from '../../lib/types';
 
-// Default viewport: Indiranagar, Bangalore — matches the simulator's route origin.
-const DEFAULT_CENTER = { lat: 12.9783, lng: 77.6408 };
+// Default viewport: Lucknow — matches the Medanta → Tender Palm route.
+const DEFAULT_CENTER = { lat: 26.82, lng: 80.97 };
 const FLEET_WS_URL = process.env.NEXT_PUBLIC_SIM_WS_URL ?? 'ws://localhost:4001';
 
 // --------------------------------------------------------------------------
@@ -103,10 +103,10 @@ function MapLegend({
         <div style={{
           borderTop: '1px solid rgba(255,255,255,0.15)',
           marginTop: 4, paddingTop: 4,
-          color: routeSource === 'api' ? '#22c55e' : routeSource === 'simulation' ? '#fbbf24' : '#6b7280',
+          color: routeSource === 'api' || routeSource === 'cached' ? '#22c55e' : routeSource === 'prerecorded' ? '#fbbf24' : routeSource === 'unavailable' ? '#ef4444' : '#6b7280',
           fontSize: 10,
         }}>
-          ⬤ ROUTE: {routeSource === 'api' ? 'LIVE API (road-aligned)' : routeSource === 'simulation' ? 'SIMULATION (road-shaped)' : 'LOADING…'}
+          ⬤ ROUTE: {routeSource === 'api' ? 'LIVE API' : routeSource === 'cached' ? 'CACHED (API)' : routeSource === 'prerecorded' ? 'PRE-RECORDED' : routeSource === 'unavailable' ? 'UNAVAILABLE' : 'LOADING…'}
         </div>
       )}
       {corridorSource && corridorSource !== 'none' && (
@@ -254,7 +254,7 @@ interface CorridorMapProps {
   onHandoff?: (p: HandoffInitiatedPayload) => void;
   origin?: GeoPoint;
   destination?: GeoPoint;
-  /** Decoded road-geometry waypoints from the Directions API (or simulation). */
+  /** Decoded road-geometry waypoints from the Directions API (or pre-recorded fallback). */
   polyline?: GeoPoint[];
   etaSeconds?: number;
   startedAt?: string | null;

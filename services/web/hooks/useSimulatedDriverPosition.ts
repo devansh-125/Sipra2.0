@@ -17,17 +17,18 @@ interface LatLng {
  *  2. Polyline-crawl mode — when a route polyline is provided, the simulated
  *     driver walks along it at a realistic speed starting at a random offset
  *     derived from `driverSeed`. This keeps demo drivers on real roads.
- *  3. Circular orbit — legacy fallback when no polyline is available.
+ *  3. Static center — when no polyline is available, return the center point
+ *     without any off-road drift. NEVER orbit off-road.
  *
- * @param center    - Centre point for the circular fallback.
- * @param radiusM   - Radius for the circular fallback (metres).
+ * @param center    - Centre point for the static fallback.
+ * @param radiusM   - Unused (kept for API compatibility).
  * @param tickMs    - Position update interval (milliseconds).
  * @param polyline  - Optional road-geometry polyline (GeoPoints).
  * @param driverSeed - Deterministic seed for polyline start offset (e.g. driver ID hash).
  */
 export function useSimulatedDriverPosition(
   center: LatLng,
-  radiusM: number = 500,
+  _radiusM: number = 500,
   tickMs: number = 1000,
   polyline?: GeoPoint[],
   driverSeed: number = 0,
@@ -64,7 +65,7 @@ export function useSimulatedDriverPosition(
         // Wrap at 1 so the driver loops the route (continuous demo motion)
         const progress  = (seedFraction + elapsedS * speedMs) % 1;
 
-        // Interpolate position along the polyline
+        // Interpolate position along the polyline (road-snapped segments)
         const n       = polyline.length - 1;
         const segF    = progress * n;
         const segIdx  = Math.min(Math.floor(segF), n - 1);
@@ -82,20 +83,11 @@ export function useSimulatedDriverPosition(
       return () => clearInterval(id);
     }
 
-    // ── Priority 3: circular orbit (legacy fallback) ───────────────────────
-    const tick = () => {
-      const elapsed = (Date.now() - startRef.current) / 1000;
-      const angle   = (2 * Math.PI * elapsed) / 60;
-      const latOff  = (radiusM / 111_320) * Math.sin(angle);
-      const lngOff  =
-        (radiusM / (111_320 * Math.cos((center.lat * Math.PI) / 180))) * Math.cos(angle);
-      setPosition({ lat: center.lat + latOff, lng: center.lng + lngOff });
-    };
-
-    tick();
-    const id = setInterval(tick, tickMs);
-    return () => clearInterval(id);
-  }, [center.lat, center.lng, radiusM, tickMs, overrideLat, overrideLng, polyline, driverSeed]);
+    // ── Priority 3: Static center (no off-road drift) ─────────────────────
+    // When no polyline and no query override, sit at center.
+    // NEVER orbit off-road in circles.
+    setPosition(center);
+  }, [center.lat, center.lng, tickMs, overrideLat, overrideLng, polyline, driverSeed]);
 
   return position;
 }

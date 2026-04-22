@@ -3,157 +3,202 @@
 /**
  * useAmbulanceAnimation
  *
- * Drives the ambulance dot's on-screen position by blending two sources:
+ * Keeps the ambulance marker snapped to the decoded road polyline at all times.
  *
- *   Primary  : Live GPS_UPDATE frames from the Go backend (useSipraWebSocket).
- *              When a new frame arrives it is snapped to the nearest polyline
- *              segment (if available) so GPS jitter never drags the marker
- *              off the road, then the deck.gl transition smooths it.
+ *   Primary  : Live GPS_UPDATE frames are projected onto the nearest polyline
+ *              segment so GPS noise never drags the marker off the road.
  *
- *   Fallback : If no WS update arrives within STALE_THRESHOLD_MS the hook
- *              switches to client-side interpolation along the decoded
- *              polyline, advancing proportionally to elapsed mission time
- *              vs total etaSeconds. This means the ambulance keeps moving
- *              even when the backend is offline / demo mode.
+ *   Fallback : When no GPS has arrived for STALE_THRESHOLD_MS the marker
+ *              advances along the polyline by distance (not by waypoint
+ *              index), segment-by-segment, proportional to elapsed mission
+ *              time vs etaSeconds. Monotonic — never goes backwards, never
+ *              teleports.
  *
- * Returns { lat, lng } — always a valid coordinate (defaults to origin).
+ * Off-road drift is structurally impossible: every position returned is the
+ * output of a polyline projection, never a raw lat/lng.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GeoPoint } from '../lib/types';
 
-const STALE_THRESHOLD_MS = 2_000; // Switch to interpolation after 2 s of silence
-const TICK_MS = 500;              // Interpolation update rate
-const MIN_ETA_SECONDS = 60;       // Guard against 0-ETA edge case
+const STALE_THRESHOLD_MS = 2_000;
+const TICK_MS = 500;
+const MIN_ETA_SECONDS = 60;
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
+// ---------------------------------------------------------------------------
+// Distance helpers
+// ---------------------------------------------------------------------------
+
+const DEG_TO_RAD = Math.PI / 180;
+const EARTH_M = 6_371_000;
+
+function haversineMeters(a: GeoPoint, b: GeoPoint): number {
+  const dLat = (b.lat - a.lat) * DEG_TO_RAD;
+  const dLng = (b.lng - a.lng) * DEG_TO_RAD;
+  const s = Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * DEG_TO_RAD) * Math.cos(b.lat * DEG_TO_RAD) *
+    Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_M * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
-/** Find position along the polyline for a given progress ratio [0..1]. */
-function positionOnPolyline(polyline: GeoPoint[], t: number): GeoPoint {
-  if (polyline.length === 0) return { lat: 0, lng: 0 };
-  if (polyline.length === 1) return polyline[0];
-
-  const clamped = Math.max(0, Math.min(1, t));
-  if (clamped >= 1) return polyline[polyline.length - 1];
-  if (clamped <= 0) return polyline[0];
-
-  // Distribute progress evenly across segments.
-  const segment = clamped * (polyline.length - 1);
-  const idx = Math.floor(segment);
-  const frac = segment - idx;
-  const a = polyline[idx];
-  const b = polyline[idx + 1];
-  return { lat: lerp(a.lat, b.lat, frac), lng: lerp(a.lng, b.lng, frac) };
+/** Cumulative-distance array along the polyline, in metres. */
+function cumulativeDistances(polyline: GeoPoint[]): number[] {
+  const cum = new Array<number>(polyline.length);
+  cum[0] = 0;
+  for (let i = 1; i < polyline.length; i++) {
+    cum[i] = cum[i - 1] + haversineMeters(polyline[i - 1], polyline[i]);
+  }
+  return cum;
 }
 
 /**
- * Project a raw GPS point onto the nearest segment of the route polyline.
- * This keeps the ambulance marker on the road even when the raw GPS signal
- * drifts slightly off to the side (common with phone/hardware GPS noise).
- *
- * Uses a 2-D perpendicular-distance projection in lat/lng space. Precision
- * is sufficient for sub-50m snapping at Bangalore latitudes.
+ * Return the lat/lng located `targetM` metres along the polyline.
+ * Walks segment-by-segment — output is always on the road path, never off it.
  */
-function snapToPolyline(raw: GeoPoint, polyline: GeoPoint[]): GeoPoint {
-  if (polyline.length < 2) return raw;
+function positionAtDistance(
+  polyline: GeoPoint[],
+  cum: number[],
+  targetM: number,
+): GeoPoint {
+  const total = cum[cum.length - 1];
+  if (total <= 0) return polyline[0];
+  const t = Math.max(0, Math.min(total, targetM));
 
-  let bestDist = Infinity;
-  let bestPt: GeoPoint = raw;
+  // Binary search for the segment [lo, lo+1] containing `t`.
+  let lo = 0;
+  let hi = cum.length - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >>> 1;
+    if (cum[mid] <= t) lo = mid; else hi = mid;
+  }
+  const segLen = cum[hi] - cum[lo];
+  const frac = segLen > 0 ? (t - cum[lo]) / segLen : 0;
+  const a = polyline[lo];
+  const b = polyline[hi];
+  return { lat: a.lat + (b.lat - a.lat) * frac, lng: a.lng + (b.lng - a.lng) * frac };
+}
+
+/**
+ * Snap raw GPS to the polyline: project onto the segment with the shortest
+ * perpendicular distance, and also return the distance travelled along the
+ * polyline so the fallback interpolator can resume monotonically.
+ */
+function snapToPolyline(
+  raw: GeoPoint,
+  polyline: GeoPoint[],
+  cum: number[],
+): { pos: GeoPoint; distanceAlongM: number } {
+  let bestDist2 = Infinity;
+  let bestPos: GeoPoint = polyline[0];
+  let bestDistanceAlongM = 0;
 
   for (let i = 0; i < polyline.length - 1; i++) {
     const a = polyline[i];
     const b = polyline[i + 1];
-
-    const abLat  = b.lat - a.lat;
-    const abLng  = b.lng - a.lng;
+    const abLat = b.lat - a.lat;
+    const abLng = b.lng - a.lng;
     const abLen2 = abLat * abLat + abLng * abLng;
+    if (abLen2 === 0) continue;
 
-    if (abLen2 === 0) continue; // degenerate zero-length segment
-
-    // Scalar projection of (raw - a) onto AB, clamped to segment [0, 1]
-    const t = Math.max(0, Math.min(1,
-      ((raw.lat - a.lat) * abLat + (raw.lng - a.lng) * abLng) / abLen2,
-    ));
-
+    const tRaw = ((raw.lat - a.lat) * abLat + (raw.lng - a.lng) * abLng) / abLen2;
+    const t = Math.max(0, Math.min(1, tRaw));
     const proj: GeoPoint = { lat: a.lat + t * abLat, lng: a.lng + t * abLng };
+
     const dLat = raw.lat - proj.lat;
     const dLng = raw.lng - proj.lng;
-    const dist = dLat * dLat + dLng * dLng;
-
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestPt   = proj;
+    const d2 = dLat * dLat + dLng * dLng;
+    if (d2 < bestDist2) {
+      bestDist2 = d2;
+      bestPos = proj;
+      bestDistanceAlongM = cum[i] + t * (cum[i + 1] - cum[i]);
     }
   }
 
-  return bestPt;
+  return { pos: bestPos, distanceAlongM: bestDistanceAlongM };
 }
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
 
 export interface AmbulanceAnimState {
   lat: number;
   lng: number;
-  /** true = live GPS (snapped to road), false = polyline-interpolated */
+  /** true = driven by live GPS (snapped to road), false = polyline interpolation */
   isLive: boolean;
 }
 
 export function useAmbulanceAnimation(
-  /** Live GPS from useSipraWebSocket. null = no data yet. */
   wsLat: number | null,
   wsLng: number | null,
-  /** Decoded road-geometry waypoints. May be empty while loading. */
   polyline: GeoPoint[],
-  /** Traffic-aware ETA for the full route (seconds). */
   etaSeconds: number,
-  /** RFC3339 timestamp the mission started (trip.started_at). */
   startedAt: string | null | undefined,
-  /** Fallback origin for before we have any data. */
   origin: GeoPoint | undefined,
 ): AmbulanceAnimState {
+  const cum = useMemo(() => cumulativeDistances(polyline), [polyline]);
+  const totalM = cum.length > 0 ? cum[cum.length - 1] : 0;
+
   const lastWsUpdateRef = useRef<number>(0);
-  const startTimeRef    = useRef<number>(
+  // Monotonic distance-travelled along the polyline (metres).
+  // Fallback interpolator never decreases this; WS updates may advance it.
+  const distanceAlongRef = useRef<number>(0);
+  const startTimeRef = useRef<number>(
     startedAt ? new Date(startedAt).getTime() : Date.now(),
   );
 
   const [state, setState] = useState<AmbulanceAnimState>(() => ({
-    lat: origin?.lat ?? 0,
-    lng: origin?.lng ?? 0,
+    lat: origin?.lat ?? polyline[0]?.lat ?? 0,
+    lng: origin?.lng ?? polyline[0]?.lng ?? 0,
     isLive: false,
   }));
 
-  // When the WS position updates, snap it to the route polyline (if loaded)
-  // then record the time and update state.
+  // Reset monotonic cursor when the polyline itself changes (e.g. reroute).
+  // The next GPS or tick will seed a new distanceAlong value.
+  useEffect(() => {
+    distanceAlongRef.current = 0;
+  }, [polyline]);
+
+  // Live GPS → snap to road + advance the monotonic cursor.
   useEffect(() => {
     if (wsLat === null || wsLng === null) return;
-    lastWsUpdateRef.current = Date.now();
+    if (polyline.length < 2) {
+      setState({ lat: wsLat, lng: wsLng, isLive: true });
+      return;
+    }
     const raw: GeoPoint = { lat: wsLat, lng: wsLng };
-    const snapped = polyline.length >= 2 ? snapToPolyline(raw, polyline) : raw;
-    setState({ lat: snapped.lat, lng: snapped.lng, isLive: true });
-  }, [wsLat, wsLng, polyline]);
+    const { pos, distanceAlongM } = snapToPolyline(raw, polyline, cum);
+    lastWsUpdateRef.current = Date.now();
+    if (distanceAlongM > distanceAlongRef.current) {
+      distanceAlongRef.current = distanceAlongM;
+    }
+    setState({ lat: pos.lat, lng: pos.lng, isLive: true });
+  }, [wsLat, wsLng, polyline, cum]);
 
-  // Tick: if WS data has gone stale, interpolate along the polyline.
+  // Fallback tick — advance along polyline by distance proportional to elapsed time.
   useEffect(() => {
-    if (polyline.length < 2) return;
-
-    const effectiveEta = Math.max(MIN_ETA_SECONDS, etaSeconds);
+    if (polyline.length < 2 || totalM <= 0) return;
+    const eta = Math.max(MIN_ETA_SECONDS, etaSeconds);
 
     const id = setInterval(() => {
       const now = Date.now();
-      const age = now - lastWsUpdateRef.current;
-      if (age < STALE_THRESHOLD_MS) return; // WS is fresh — leave it alone
+      if (now - lastWsUpdateRef.current < STALE_THRESHOLD_MS) return;
 
-      // Use startedAt if available, otherwise assume we started at mount.
       const elapsedS = (now - startTimeRef.current) / 1_000;
-      const progress = Math.min(1, elapsedS / effectiveEta);
-      const pos = positionOnPolyline(polyline, progress);
+      const progress = Math.min(1, Math.max(0, elapsedS / eta));
+      const targetM = progress * totalM;
+
+      // Monotonic — never retreat.
+      if (targetM > distanceAlongRef.current) {
+        distanceAlongRef.current = targetM;
+      }
+      const pos = positionAtDistance(polyline, cum, distanceAlongRef.current);
       setState({ lat: pos.lat, lng: pos.lng, isLive: false });
     }, TICK_MS);
 
     return () => clearInterval(id);
-  }, [polyline, etaSeconds]);
+  }, [polyline, cum, totalM, etaSeconds]);
 
-  // Update start-time ref if startedAt changes.
   useEffect(() => {
     if (startedAt) startTimeRef.current = new Date(startedAt).getTime();
   }, [startedAt]);

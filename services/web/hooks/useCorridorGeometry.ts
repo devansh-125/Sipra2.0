@@ -6,11 +6,8 @@
  * Memoized hook that converts a route polyline into a road-aligned buffered
  * GeoJSON Polygon corridor.
  *
- * Priority:
- *   1. If polyline >= 2 points → build a real road-geometry corridor.
- *   2. If origin + destination provided but no polyline → build a simulated
- *      straight-line corridor (demo fallback).
- *   3. Otherwise → null.
+ * Only builds a corridor when a real road-geometry polyline (≥ 2 points) is
+ * available. NEVER fabricates a straight-line corridor — returns null instead.
  *
  * The same shape is used in:
  *   - Mission Control map (ExclusionPolygon layer)
@@ -20,7 +17,7 @@
 
 import { useMemo } from 'react';
 import type { Polygon } from 'geojson';
-import { buildCorridorPolygon, buildSimulatedCorridor } from '../lib/corridorGeometry';
+import { buildCorridorPolygon } from '../lib/corridorGeometry';
 import type { GeoPoint } from '../lib/types';
 
 export const DEFAULT_BUFFER_M = 75;
@@ -28,20 +25,16 @@ export const DEFAULT_BUFFER_M = 75;
 export function useCorridorGeometry(
   polyline: GeoPoint[],
   bufferMeters: number = DEFAULT_BUFFER_M,
-  origin?: GeoPoint,
-  destination?: GeoPoint,
+  _origin?: GeoPoint,
+  _destination?: GeoPoint,
 ): Polygon | null {
   return useMemo(() => {
-    // ── Path 1: Real road polyline ──────────────────────────────────────────
+    // Only build corridor from real road-geometry polyline.
+    // NEVER fabricate a straight-line corridor from origin/destination.
     if (polyline.length >= 2) {
       return buildCorridorPolygon(polyline, bufferMeters);
     }
 
-    // ── Path 2: Simulated fallback (straight line) ──────────────────────────
-    if (origin && destination) {
-      return buildSimulatedCorridor(origin, destination, bufferMeters);
-    }
-
     return null;
-  }, [polyline, bufferMeters, origin, destination]);
+  }, [polyline, bufferMeters]);
 }

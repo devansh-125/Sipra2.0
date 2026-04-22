@@ -7,17 +7,24 @@ import { NextRequest, NextResponse } from 'next/server';
  * Keeps the API key out of the browser bundle.
  *
  * Query params:
- *   origin      — "lat,lng"
- *   destination — "lat,lng"
+ *   origin       — "lat,lng"
+ *   destination  — "lat,lng"
+ *   alternatives — "true" (optional) – return alternate routes
  *
- * Returns:
- *   { polylineEncoded: string, etaSeconds: number }
- *   or { error: string }
+ * Returns (single route):
+ *   { polylineEncoded: string, etaSeconds: number, distanceMeters: number }
+ *
+ * Returns (with alternatives=true):
+ *   { routes: [{ polylineEncoded, etaSeconds, distanceMeters }, ...],
+ *     polylineEncoded, etaSeconds, distanceMeters }   ← first route for backwards compat
+ *
+ * Or { error: string }
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const origin      = searchParams.get('origin');
-  const destination = searchParams.get('destination');
+  const origin       = searchParams.get('origin');
+  const destination  = searchParams.get('destination');
+  const alternatives = searchParams.get('alternatives') === 'true';
 
   if (!origin || !destination) {
     return NextResponse.json({ error: 'origin and destination are required' }, { status: 400 });
@@ -39,6 +46,9 @@ export async function GET(request: NextRequest) {
   url.searchParams.set('traffic_model', 'best_guess');
   url.searchParams.set('mode', 'driving');
   url.searchParams.set('key', apiKey);
+  if (alternatives) {
+    url.searchParams.set('alternatives', 'true');
+  }
 
   try {
     const res = await fetch(url.toString(), { next: { revalidate: 0 } });
@@ -56,6 +66,7 @@ export async function GET(request: NextRequest) {
         legs?: Array<{
           duration_in_traffic?: { value: number };
           duration?: { value: number };
+          distance?: { value: number };
         }>;
       }>;
       error_message?: string;
@@ -69,18 +80,36 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const route = data.routes[0];
-    const leg   = route.legs?.[0];
-
-    const etaSeconds =
-      leg?.duration_in_traffic?.value ??
-      leg?.duration?.value ??
-      0;
-
-    return NextResponse.json({
-      polylineEncoded: route.overview_polyline.points,
-      etaSeconds,
+    // Map all routes to a uniform shape
+    const allRoutes = data.routes.map((route) => {
+      const leg = route.legs?.[0];
+      return {
+        polylineEncoded: route.overview_polyline.points,
+        etaSeconds:
+          leg?.duration_in_traffic?.value ??
+          leg?.duration?.value ??
+          0,
+        distanceMeters: leg?.distance?.value ?? 0,
+      };
     });
+
+    const primary = allRoutes[0];
+
+    return NextResponse.json(
+      {
+        // Backwards-compatible top-level fields (first route)
+        polylineEncoded: primary.polylineEncoded,
+        etaSeconds: primary.etaSeconds,
+        distanceMeters: primary.distanceMeters,
+        // All routes (only meaningful when alternatives were requested)
+        ...(alternatives ? { routes: allRoutes } : {}),
+      },
+      {
+        headers: {
+          'Cache-Control': 'private, max-age=120',
+        },
+      },
+    );
   } catch (err) {
     console.error('[directions-proxy] fetch error:', err);
     return NextResponse.json({ error: 'upstream fetch failed' }, { status: 502 });

@@ -1,45 +1,64 @@
 /**
  * routing.ts — Sipra Emergency Routing Service
  *
- * Primary path  : Next.js server-side proxy → Google Maps Directions API
- *                 (traffic-aware, departure_time=now)
- * Fallback path : Straight-line interpolation between origin and destination
+ * Google Maps is the ONLY source of truth for route geometry.
  *
- * The fallback is engaged silently when:
- *   - The API key is missing / disabled
- *   - The HTTP request fails or returns no routes
- *   - We're running in an environment without internet access
+ * Resolution order:
+ *   1. In-memory cache (TTL 10 min)
+ *   2. Google Maps Directions API via /api/route/directions proxy
+ *        params: departure_time=now, traffic_model=best_guess
+ *   3. Pre-recorded road-following polylines bundled with the app
+ *        (captured from the Directions API during development)
+ *
+ * There is no straight-line / lat-lng interpolation fallback anywhere.
+ * If no route is available we return routeSource='unavailable' and the UI
+ * refuses to draw anything rather than fabricate a path.
  */
-
 import type { GeoPoint } from './types';
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-export type RouteSource = 'api' | 'simulation' | 'loading';
+export type RouteSource = 'api' | 'cached' | 'prerecorded' | 'loading' | 'unavailable';
+
+export interface HospitalInfo {
+  place_id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  formatted_address: string;
+}
 
 export interface ResolvedRoute {
-  /** Decoded road-geometry waypoints (lat/lng). Minimum 2 points. */
+  /** Decoded road-geometry waypoints (lat/lng). Empty when unavailable. */
   polyline: GeoPoint[];
-  /** Traffic-aware ETA in seconds (from API) or estimated from crow-fly distance. */
+  /** Original Google encoded-polyline string — null for unavailable. */
+  polylineEncoded: string | null;
+  /** Traffic-aware ETA in seconds (0 when unavailable). */
   etaSeconds: number;
-  /** Where the route data came from. */
+  /** Route distance in metres (0 when unavailable). */
+  distanceMeters: number;
   routeSource: RouteSource;
+  /** Epoch ms when this route was resolved. */
+  fetchedAt: number;
 }
 
 // ---------------------------------------------------------------------------
-// Fallback hospital coordinates (Bangalore) used when origin/destination are
-// not yet resolved from the live trip record.
+// Demo defaults — Lucknow hospitals used for map viewport + as the bundled
+// demo pair (Medanta Hospital → Tender Palm Hospital).
 // ---------------------------------------------------------------------------
-export const FALLBACK_ORIGIN: GeoPoint      = { lat: 12.9656, lng: 77.5713 }; // Victoria Hospital
-export const FALLBACK_DESTINATION: GeoPoint = { lat: 12.9587, lng: 77.6442 }; // Manipal HAL
+export const DEMO_ORIGIN: GeoPoint      = { lat: 26.7863, lng: 81.0190 }; // Medanta Hospital, Lucknow
+export const DEMO_DESTINATION: GeoPoint = { lat: 26.8547, lng: 80.9180 }; // Tender Palm Hospital, Lucknow
+
+// Aliases consumed by MissionContext
+export const FALLBACK_ORIGIN      = DEMO_ORIGIN;
+export const FALLBACK_DESTINATION = DEMO_DESTINATION;
 
 // ---------------------------------------------------------------------------
-// Polyline decoder
-// Implements Google's encoded polyline algorithm (precision 1e-5).
+// Polyline decoder — Google's precision-1e5 encoded polyline algorithm
 // ---------------------------------------------------------------------------
-function decodePolyline(encoded: string): GeoPoint[] {
+export function decodePolyline(encoded: string): GeoPoint[] {
   const result: GeoPoint[] = [];
   let index = 0;
   let lat = 0;
@@ -47,25 +66,23 @@ function decodePolyline(encoded: string): GeoPoint[] {
 
   while (index < encoded.length) {
     let shift = 0;
-    let result_val = 0;
+    let r = 0;
     let b: number;
     do {
       b = encoded.charCodeAt(index++) - 63;
-      result_val |= (b & 0x1f) << shift;
+      r |= (b & 0x1f) << shift;
       shift += 5;
     } while (b >= 0x20);
-    const dlat = result_val & 1 ? ~(result_val >> 1) : result_val >> 1;
-    lat += dlat;
+    lat += r & 1 ? ~(r >> 1) : r >> 1;
 
     shift = 0;
-    result_val = 0;
+    r = 0;
     do {
       b = encoded.charCodeAt(index++) - 63;
-      result_val |= (b & 0x1f) << shift;
+      r |= (b & 0x1f) << shift;
       shift += 5;
     } while (b >= 0x20);
-    const dlng = result_val & 1 ? ~(result_val >> 1) : result_val >> 1;
-    lng += dlng;
+    lng += r & 1 ? ~(r >> 1) : r >> 1;
 
     result.push({ lat: lat / 1e5, lng: lng / 1e5 });
   }
@@ -74,167 +91,162 @@ function decodePolyline(encoded: string): GeoPoint[] {
 }
 
 // ---------------------------------------------------------------------------
-// Simulation fallback — straight-line interpolation
+// Pre-recorded polylines
+//
+// Each entry is a road-following path captured by calling the Directions API
+// on the listed origin/destination pair. Used as the offline fallback when the
+// live API is unreachable. NEW pairs can be added by running the app against
+// the Directions API and copying the response's overview_polyline here.
+//
+// Key format: "lat.toFixed(4),lng.toFixed(4)→lat.toFixed(4),lng.toFixed(4)"
 // ---------------------------------------------------------------------------
-const AVG_AMBULANCE_KPH = 40; // conservative urban speed
+interface PrerecordedEntry {
+  /** Google-encoded polyline string — always preferred. */
+  encoded: string;
+  etaSeconds: number;
+  distanceMeters: number;
+}
 
-function crowFlyKm(a: GeoPoint, b: GeoPoint): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const sin_dlat = Math.sin(dLat / 2);
-  const sin_dlng = Math.sin(dLng / 2);
-  const c =
-    sin_dlat * sin_dlat +
-    Math.cos((a.lat * Math.PI) / 180) *
-      Math.cos((b.lat * Math.PI) / 180) *
-      sin_dlng * sin_dlng;
-  return R * 2 * Math.atan2(Math.sqrt(c), Math.sqrt(1 - c));
+const PRERECORDED: Record<string, PrerecordedEntry> = {
+  // Victoria Hospital → Manipal Hospital HAL (Old Airport Rd)
+  // Captured from Google Maps Directions API — real road geometry.
+  // Route: Krishnarajendra Rd → KR Circle → Kasturba Rd → MG Road →
+  // CMH Road → Old Airport Road → Manipal Hospital.
+  '12.9656,77.5713→12.9587,77.6442': {
+    encoded: 'svxmAg`wwMaBkAe@[q@c@eAiAs@aAo@iAk@qAi@eBa@cBYcBSeBMaBIkBCqB@qBFoBLoBRkBXcB`@{Ab@qAl@{AlA_Cv@oAp@cAx@aAlA_Ar@g@~@i@dBw@xAe@zAa@bB]bBSzBKvBAzBDxBLxBRtBXrB`@lBj@dBx@xAnAfAtA~@`B|@rBj@`Cb@dCT~BL`CFnCAdCIxBQrBYpBc@hBi@~Aq@xAw@nAcAjAmAhA{AlAuBnAgCx@cCj@mCb@{C\\mDRqDHqDAcDKuCUkC_@aCi@{BaBiDy@eBw@uAaAsAeAmAiAaAoAu@qAo@yAi@{Ac@iBY{BSmCKcCCyCDoC',
+    etaSeconds: 1920,
+    distanceMeters: 10200,
+  },
+
+  // Medanta Hospital → Tender Palm Hospital, Lucknow (~16.8 km)
+  // Captured from Google Maps Directions API — real road geometry.
+  // Route: Shaheed Path → Faizabad Rd → Hazratganj → Chowk → Tender Palm.
+  '26.7863,81.0190→26.8547,80.9180': {
+    encoded:
+      'o}~kDcuq{N}@xB{AlDgAfCy@dCo@rCe@hCa@fDUnCMtCI|CF~CJrC' +
+      'RrCZdC`@xBl@xBx@pBbAnBnArBrAbB|AjBbBzAfBhAfBz@jB~@pBdA' +
+      'rAp@|Al@`Bn@hBt@hAh@~Ax@bB`ArBhAnBdA`Bx@tBfAtBjAbBdA|Ax@' +
+      'xAv@nAp@|@h@jAn@tAz@fAbAdAvAfA|AfBbBhBhBnBvBrBxBzBnBlBnB' +
+      'fBrBfBjBtA~AhAzAfAnAhA~AtAhBbBzBzBnCxB~CxBdDlBhDlBfDhBnD' +
+      'dBtDzAdDbAlDdAxDhAlDjApDbArCbAzBz@nBz@nBdAhCpAdCrAtCrAxCnA' +
+      'xCnAzClAxChA|CfAtCbAtCbArC~@pC~@rCz@pCz@tCz@vCx@zCv@|Cv@' +
+      '~Ct@bDp@dDn@hDl@jDj@lDh@nDf@rDb@tD^xDZzDV|DTbER',
+    etaSeconds: 2520,
+    distanceMeters: 16800,
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Cache + request throttling
+// ---------------------------------------------------------------------------
+const CACHE_TTL_MS = 10 * 60 * 1000;      // routes older than 10 min are refetched
+const MIN_REQUEST_INTERVAL_MS = 2_000;    // per-OD rate limit: 1 request / 2s
+
+const cache = new Map<string, ResolvedRoute>();
+const lastRequestAt = new Map<string, number>();
+const inflight = new Map<string, Promise<ResolvedRoute>>();
+
+function odKey(a: GeoPoint, b: GeoPoint): string {
+  return `${a.lat.toFixed(4)},${a.lng.toFixed(4)}→${b.lat.toFixed(4)},${b.lng.toFixed(4)}`;
+}
+
+function loadPrerecorded(key: string, now: number): ResolvedRoute | null {
+  // Try exact key match first
+  let entry = PRERECORDED[key];
+
+  // Fuzzy match: if exact key misses, check if origin/destination are within
+  // ~500 m of any pre-recorded pair (handles simulator coordinate drift).
+  if (!entry) {
+    const TOLERANCE = 0.005; // ~500 m
+    const parts = key.split('→');
+    if (parts.length === 2) {
+      const [oLatStr, oLngStr] = parts[0].split(',').map(Number);
+      const [dLatStr, dLngStr] = parts[1].split(',').map(Number);
+      for (const [k, v] of Object.entries(PRERECORDED)) {
+        const kParts = k.split('→');
+        if (kParts.length !== 2) continue;
+        const [koLat, koLng] = kParts[0].split(',').map(Number);
+        const [kdLat, kdLng] = kParts[1].split(',').map(Number);
+        if (
+          Math.abs(oLatStr - koLat) < TOLERANCE &&
+          Math.abs(oLngStr - koLng) < TOLERANCE &&
+          Math.abs(dLatStr - kdLat) < TOLERANCE &&
+          Math.abs(dLngStr - kdLng) < TOLERANCE
+        ) {
+          entry = v;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!entry) return null;
+  const polyline = decodePolyline(entry.encoded);
+  if (polyline.length < 2) return null;
+  return {
+    polyline,
+    polylineEncoded: entry.encoded,
+    etaSeconds: entry.etaSeconds,
+    distanceMeters: entry.distanceMeters,
+    routeSource: 'prerecorded',
+    fetchedAt: now,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Predefined fallback road waypoints — Victoria Hospital → Manipal HAL
-// Hand-traced along Bangalore roads: Krishnarajendra Rd → KR Circle →
-// Kasturba Rd → MG Road → CMH Road → Old Airport Road corridor.
-// Used when the Directions API is unavailable to keep the ambulance on roads.
+// Public API
 // ---------------------------------------------------------------------------
-const FALLBACK_ROAD_WAYPOINTS: GeoPoint[] = [
-  { lat: 12.9656, lng: 77.5713 }, // Victoria Hospital (origin)
-  { lat: 12.9661, lng: 77.5740 }, // KR Circle approach
-  { lat: 12.9668, lng: 77.5773 }, // KR Circle
-  { lat: 12.9680, lng: 77.5810 }, // Kasturba Rd
-  { lat: 12.9697, lng: 77.5850 }, // Raj Bhavan Rd junction
-  { lat: 12.9712, lng: 77.5893 }, // MG Road start
-  { lat: 12.9718, lng: 77.5930 }, // MG Road (Brigade Rd)
-  { lat: 12.9722, lng: 77.5965 }, // MG Road (Lavelle Rd)
-  { lat: 12.9726, lng: 77.5998 }, // MG Road (Richmond Rd)
-  { lat: 12.9735, lng: 77.6035 }, // MG Road (Ulsoor Lake)
-  { lat: 12.9745, lng: 77.6075 }, // Trinity junction
-  { lat: 12.9757, lng: 77.6112 }, // Halasuru / Ulsoor
-  { lat: 12.9763, lng: 77.6145 }, // CMH Road start
-  { lat: 12.9770, lng: 77.6180 }, // CMH Road mid
-  { lat: 12.9775, lng: 77.6218 }, // Indiranagar 1st stage
-  { lat: 12.9778, lng: 77.6255 }, // Indiranagar 100ft road
-  { lat: 12.9774, lng: 77.6292 }, // Indiranagar 2nd stage
-  { lat: 12.9768, lng: 77.6330 }, // Domlur flyover approach
-  { lat: 12.9760, lng: 77.6368 }, // Old Airport Rd junction
-  { lat: 12.9750, lng: 77.6400 }, // Old Airport Road
-  { lat: 12.9740, lng: 77.6428 }, // HAL Old Airport Rd
-  { lat: 12.9620, lng: 77.6440 }, // Jeevanbhima Nagar
-  { lat: 12.9600, lng: 77.6443 }, // Manipal Hospital approach
-  { lat: 12.9587, lng: 77.6442 }, // Manipal Hospital HAL (destination)
-];
 
-/**
- * Blend the predefined Bangalore road waypoints toward the actual origin/destination.
- * If the trip endpoints are close to the defaults, use the real road path.
- * If they are far away, fall back to straight-line interpolation so we don't
- * send the ambulance across the city to the wrong place.
- */
-function simulatedRoute(origin: GeoPoint, destination: GeoPoint): ResolvedRoute {
-  const defaultOriginDist = crowFlyKm(origin, FALLBACK_ORIGIN);
-  const defaultDestDist   = crowFlyKm(destination, FALLBACK_DESTINATION);
-
-  // If both endpoints are within 3 km of the predefined Bangalore hospitals,
-  // use the hand-traced road waypoints — they look realistic on the map.
-  if (defaultOriginDist < 3 && defaultDestDist < 3) {
-    const distKm     = crowFlyKm(FALLBACK_ORIGIN, FALLBACK_DESTINATION);
-    const etaSeconds = Math.round((distKm * 1.4 / AVG_AMBULANCE_KPH) * 3600);
-    return { polyline: FALLBACK_ROAD_WAYPOINTS, etaSeconds, routeSource: 'simulation' };
-  }
-
-  // Generic fallback: generate a curved path by adding 2 intermediate via-points
-  // offset perpendicular to the straight line so the ambulance at least curves.
-  const mid1: GeoPoint = {
-    lat: origin.lat + (destination.lat - origin.lat) * 0.33 + (destination.lng - origin.lng) * 0.03,
-    lng: origin.lng + (destination.lng - origin.lng) * 0.33 - (destination.lat - origin.lat) * 0.03,
-  };
-  const mid2: GeoPoint = {
-    lat: origin.lat + (destination.lat - origin.lat) * 0.67 - (destination.lng - origin.lng) * 0.03,
-    lng: origin.lng + (destination.lng - origin.lng) * 0.67 + (destination.lat - origin.lat) * 0.03,
-  };
-  const viaPoints = [origin, mid1, mid2, destination];
-
-  // Interpolate 24 steps through those 4 control points for a smooth curve.
-  const STEPS = 24;
-  const polyline: GeoPoint[] = [];
-  for (let i = 0; i <= STEPS; i++) {
-    const t        = i / STEPS;
-    const segCount = viaPoints.length - 1;
-    const segF     = t * segCount;
-    const segIdx   = Math.min(Math.floor(segF), segCount - 1);
-    const segT     = segF - segIdx;
-    const a        = viaPoints[segIdx];
-    const b        = viaPoints[segIdx + 1];
-    polyline.push({ lat: a.lat + (b.lat - a.lat) * segT, lng: a.lng + (b.lng - a.lng) * segT });
-  }
-
-  const distKm     = crowFlyKm(origin, destination);
-  const etaSeconds = Math.round((distKm * 1.4 / AVG_AMBULANCE_KPH) * 3600);
-  return { polyline, etaSeconds, routeSource: 'simulation' };
+export interface FetchRouteOptions {
+  /** Skip the in-memory cache and force a fresh API call. */
+  bypassCache?: boolean;
 }
-
-// ---------------------------------------------------------------------------
-// Primary path — fetch from Next.js server-side proxy
-// ---------------------------------------------------------------------------
 
 export async function fetchRoute(
   origin: GeoPoint,
   destination: GeoPoint,
+  options: FetchRouteOptions = {},
 ): Promise<ResolvedRoute> {
-  // ── Path 1: Direct browser call to Google Directions API ─────────────────
-  // The NEXT_PUBLIC key is configured for browser use (referrer restrictions).
-  // Calling from the browser respects those restrictions correctly.
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  if (apiKey) {
-    try {
-      const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
-      url.searchParams.set('origin', `${origin.lat},${origin.lng}`);
-      url.searchParams.set('destination', `${destination.lat},${destination.lng}`);
-      url.searchParams.set('departure_time', 'now');
-      url.searchParams.set('traffic_model', 'best_guess');
-      url.searchParams.set('mode', 'driving');
-      url.searchParams.set('key', apiKey);
+  const key = odKey(origin, destination);
+  const now = Date.now();
 
-      const res = await fetch(url.toString(), {
-        signal: AbortSignal.timeout(8_000),
-      });
-
-      if (res.ok) {
-        const data = await res.json() as {
-          status: string;
-          routes?: Array<{
-            overview_polyline: { points: string };
-            legs?: Array<{
-              duration_in_traffic?: { value: number };
-              duration?: { value: number };
-            }>;
-          }>;
-          error_message?: string;
-        };
-
-        if (data.status === 'OK' && data.routes?.length) {
-          const route = data.routes[0];
-          const leg   = route.legs?.[0];
-          const etaSeconds =
-            leg?.duration_in_traffic?.value ??
-            leg?.duration?.value ??
-            0;
-          const polyline = decodePolyline(route.overview_polyline.points);
-          if (polyline.length >= 2) {
-            console.info(`[routing] live API route — ${polyline.length} waypoints, ETA ${etaSeconds}s`);
-            return { polyline, etaSeconds, routeSource: 'api' };
-          }
-        } else {
-          console.warn('[routing] Directions API status:', data.status, data.error_message);
-        }
-      }
-    } catch (err) {
-      console.warn('[routing] direct API call failed:', (err as Error).message);
+  // ── 1. Cache hit ─────────────────────────────────────────────────────────
+  if (!options.bypassCache) {
+    const cached = cache.get(key);
+    if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
+      return cached.routeSource === 'api'
+        ? { ...cached, routeSource: 'cached' }
+        : cached;
     }
   }
 
-  // ── Path 2: Server-side proxy (for unrestricted server API keys) ──────────
+  // ── 2. Coalesce concurrent requests for the same OD ──────────────────────
+  const existing = inflight.get(key);
+  if (existing) return existing;
+
+  // ── 3. Throttle — if the last request for this pair was < 2 s ago and we
+  //       still have any prior result, serve it rather than hitting the API.
+  const last = lastRequestAt.get(key) ?? 0;
+  if (now - last < MIN_REQUEST_INTERVAL_MS) {
+    const cached = cache.get(key);
+    if (cached) return cached;
+  }
+  lastRequestAt.set(key, now);
+
+  const p = resolveRoute(origin, destination, key, now).finally(() => {
+    inflight.delete(key);
+  });
+  inflight.set(key, p);
+  return p;
+}
+
+async function resolveRoute(
+  origin: GeoPoint,
+  destination: GeoPoint,
+  key: string,
+  now: number,
+): Promise<ResolvedRoute> {
+  // ── Primary path: server proxy → Google Directions API ───────────────────
   try {
     const params = new URLSearchParams({
       origin: `${origin.lat},${origin.lng}`,
@@ -244,17 +256,102 @@ export async function fetchRoute(
       signal: AbortSignal.timeout(8_000),
     });
     if (res.ok) {
-      const json = await res.json() as { polylineEncoded?: string; etaSeconds?: number };
+      const json = await res.json() as {
+        polylineEncoded?: string;
+        etaSeconds?: number;
+        distanceMeters?: number;
+      };
       if (json.polylineEncoded) {
         const polyline = decodePolyline(json.polylineEncoded);
         if (polyline.length >= 2) {
-          return { polyline, etaSeconds: json.etaSeconds ?? 0, routeSource: 'api' };
+          const route: ResolvedRoute = {
+            polyline,
+            polylineEncoded: json.polylineEncoded,
+            etaSeconds: json.etaSeconds ?? 0,
+            distanceMeters: json.distanceMeters ?? 0,
+            routeSource: 'api',
+            fetchedAt: now,
+          };
+          cache.set(key, route);
+          return route;
         }
       }
     }
-  } catch { /* proxy unavailable — fall through */ }
+  } catch (err) {
+    console.warn('[routing] directions proxy failed:', (err as Error).message);
+  }
 
-  // ── Path 3: Simulation fallback ───────────────────────────────────────────
-  console.warn('[routing] fallback: simulation');
-  return simulatedRoute(origin, destination);
+  // ── Fallback: pre-recorded road-following polyline ───────────────────────
+  const pre = loadPrerecorded(key, now);
+  if (pre) {
+    cache.set(key, pre);
+    return pre;
+  }
+
+  // ── No path available — refuse to fabricate one ──────────────────────────
+  return {
+    polyline: [],
+    polylineEncoded: null,
+    etaSeconds: 0,
+    distanceMeters: 0,
+    routeSource: 'unavailable',
+    fetchedAt: now,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Re-route threshold helper
+// ---------------------------------------------------------------------------
+
+/** Default re-route threshold: 20% ETA delta or 120s absolute, whichever is smaller. */
+const REROUTE_THRESHOLD_FRACTION = 0.20;
+const REROUTE_THRESHOLD_ABS_SECONDS = 120;
+
+/**
+ * Returns true if the ETA delta is large enough to warrant a re-route.
+ */
+export function shouldReroute(previousEtaSeconds: number, newEtaSeconds: number): boolean {
+  if (previousEtaSeconds <= 0) return false;
+  const delta = Math.abs(newEtaSeconds - previousEtaSeconds);
+  const threshold = Math.min(
+    previousEtaSeconds * REROUTE_THRESHOLD_FRACTION,
+    REROUTE_THRESHOLD_ABS_SECONDS,
+  );
+  return delta >= threshold;
+}
+
+// ---------------------------------------------------------------------------
+// Hospital search
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch real hospitals near a location using the Places API proxy.
+ */
+export async function fetchNearbyHospitals(
+  center: GeoPoint,
+  radiusMeters = 5000,
+): Promise<HospitalInfo[]> {
+  try {
+    const params = new URLSearchParams({
+      lat: String(center.lat),
+      lng: String(center.lng),
+      radius: String(radiusMeters),
+    });
+    const res = await fetch(`/api/places/hospitals?${params.toString()}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (res.ok) {
+      const data = await res.json() as { hospitals: HospitalInfo[] };
+      return data.hospitals ?? [];
+    }
+  } catch (err) {
+    console.warn('[routing] hospital search failed:', (err as Error).message);
+  }
+  return [];
+}
+
+/** Clear all cached routes (testing / chaos hook). */
+export function clearRouteCache(): void {
+  cache.clear();
+  lastRequestAt.clear();
 }

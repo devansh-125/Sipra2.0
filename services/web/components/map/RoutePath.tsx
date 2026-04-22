@@ -3,32 +3,8 @@ import { PathLayer } from '@deck.gl/layers';
 import type { GeoPoint } from '../../lib/types';
 
 // ---------------------------------------------------------------------------
-// Dashed straight-line fallback (used when no real polyline is available)
-// ---------------------------------------------------------------------------
-
-interface DashSegment {
-  path: [[number, number], [number, number]];
-}
-
-function dashSegments(a: GeoPoint, b: GeoPoint, n = 20): DashSegment[] {
-  const segments: DashSegment[] = [];
-  for (let i = 0; i < n; i++) {
-    const t0 = i / n;
-    const t1 = (i + 1) / n;
-    if (i % 2 === 0) {
-      segments.push({
-        path: [
-          [a.lng + (b.lng - a.lng) * t0, a.lat + (b.lat - a.lat) * t0],
-          [a.lng + (b.lng - a.lng) * t1, a.lat + (b.lat - a.lat) * t1],
-        ],
-      });
-    }
-  }
-  return segments;
-}
-
-// ---------------------------------------------------------------------------
-// Real road-geometry layer (used when a decoded polyline is available)
+// Road-geometry layer — renders the decoded Directions API polyline.
+// No straight-line fallback — if no polyline is available, nothing is drawn.
 // ---------------------------------------------------------------------------
 
 interface RoadSegment {
@@ -41,43 +17,31 @@ function roadSegments(polyline: GeoPoint[]): RoadSegment[] {
 }
 
 // ---------------------------------------------------------------------------
-// Hook — picks the right layer depending on what data is available
+// Hook — renders the road-following route or nothing at all
 // ---------------------------------------------------------------------------
 
 export function useRoutePathLayer(
-  origin: GeoPoint | undefined,
-  destination: GeoPoint | undefined,
+  _origin: GeoPoint | undefined,
+  _destination: GeoPoint | undefined,
   /** Decoded road-geometry waypoints from the Directions API. */
   polyline?: GeoPoint[],
-): PathLayer<DashSegment> | PathLayer<RoadSegment> | null {
+): PathLayer<RoadSegment> | null {
   return useMemo(() => {
-    // ── Real road-geometry path ──────────────────────────────────────────
-    if (polyline && polyline.length >= 2) {
-      return new PathLayer<RoadSegment>({
-        id: 'route-path',
-        data: roadSegments(polyline),
-        getPath: (d) => d.path,
-        // Solid blue road line
-        getColor: [96, 165, 250, 220],
-        getWidth: 5,
-        widthUnits: 'pixels',
-        capRounded: true,
-        jointRounded: true,
-        pickable: false,
-      });
-    }
+    // Only render when we have a real road-geometry polyline (≥ 2 points).
+    // NEVER fabricate a straight-line fallback.
+    if (!polyline || polyline.length < 2) return null;
 
-    // ── Straight-line dashed fallback ────────────────────────────────────
-    if (!origin || !destination) return null;
-    return new PathLayer<DashSegment>({
+    return new PathLayer<RoadSegment>({
       id: 'route-path',
-      data: dashSegments(origin, destination),
+      data: roadSegments(polyline),
       getPath: (d) => d.path,
-      getColor: [96, 165, 250, 160],
-      getWidth: 4,
+      // Solid blue road line
+      getColor: [96, 165, 250, 220],
+      getWidth: 5,
       widthUnits: 'pixels',
+      capRounded: true,
+      jointRounded: true,
       pickable: false,
     });
-  }, [origin, destination, polyline]);
+  }, [polyline]);
 }
-

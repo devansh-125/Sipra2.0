@@ -198,13 +198,16 @@ export default function TripPanel() {
           {/* Route source indicator */}
           <div className="flex items-center gap-1.5">
             <span className={`w-2 h-2 rounded-full ${
-              routeSource === 'api' ? 'bg-green-500' :
-              routeSource === 'simulation' ? 'bg-amber-400' :
+              routeSource === 'api' || routeSource === 'cached' ? 'bg-green-500' :
+              routeSource === 'prerecorded' ? 'bg-amber-400' :
+              routeSource === 'unavailable' ? 'bg-red-500' :
               'bg-slate-500 animate-pulse'
             }`} />
             <span className="text-[10px] font-mono text-muted-foreground">
               {routeSource === 'api' ? 'Live routing (API)' :
-               routeSource === 'simulation' ? 'Simulated route' :
+               routeSource === 'cached' ? 'Cached route (API)' :
+               routeSource === 'prerecorded' ? 'Pre-recorded route' :
+               routeSource === 'unavailable' ? 'Route unavailable' :
                'Computing route…'}
             </span>
           </div>
