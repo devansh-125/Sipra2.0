@@ -9,6 +9,7 @@
 
 import { useState, useCallback } from 'react';
 import type { GemmaReport, GemmaTripInput } from '../../app/api/gemma/route';
+import { useHospitalVerification } from '../../hooks/useHospitalVerification';
 
 interface GemmaAIPanelProps {
     progress: number;             // 0–1 ambulance progress fraction
@@ -51,6 +52,7 @@ export default function GemmaAIPanel({
     const [report, setReport] = useState<GemmaReport | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const { hospital } = useHospitalVerification();
 
     const generateReport = useCallback(async () => {
         setLoading(true);
@@ -59,7 +61,7 @@ export default function GemmaAIPanel({
             // Build a representative trip payload
             const tripInput: GemmaTripInput = {
                 trip_id: `demo-trip-${Date.now()}`,
-                hospital_name: 'Tender Palm Hospital',
+                hospital_name: hospital?.name || 'Tender Palm Hospital',
                 total_distance_km: Number((distanceMeters / 1000).toFixed(1)),
                 golden_time_threshold_min: 60,
                 elapsed_min: Math.round(progress * 42), // ~42 min full trip
@@ -88,7 +90,7 @@ export default function GemmaAIPanel({
         } finally {
             setLoading(false);
         }
-    }, [distanceMeters, droneActivated, progress, onReportReady]);
+    }, [distanceMeters, droneActivated, progress, onReportReady, hospital]);
 
     const riskStatus = report?.risk_status ?? (droneActivated ? 'Drone Required' : progress > 0.8 ? 'Critical' : progress > 0.5 ? 'Watchlist' : 'Safe');
     const riskColor = RISK_COLORS[riskStatus];

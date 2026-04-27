@@ -21,6 +21,7 @@ import { buildRewardsSettlement } from '../../lib/rewardsSettlement';
 const GemmaAIPanel = dynamic(() => import('./GemmaAIPanel'), { ssr: false });
 const GemmaAnalyticsPanel = dynamic(() => import('./GemmaAnalyticsPanel'), { ssr: false });
 const DroneIntelligencePopup = dynamic(() => import('./DroneIntelligencePopup'), { ssr: false });
+import { useHospitalVerification } from '../../hooks/useHospitalVerification';
 
 // ---------------------------------------------------------------------------
 // Golden hour helpers
@@ -69,6 +70,7 @@ export default function MissionStatusSidebar({
   onViewRewards,
 }: MissionStatusSidebarProps) {
   const [tick, setTick] = useState(0);
+  const { hospital } = useHospitalVerification();
 
   // Re-render every second for countdown
   useEffect(() => {
@@ -133,7 +135,7 @@ export default function MissionStatusSidebar({
           SIPRA
         </div>
         <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.5, marginTop: 2 }}>
-          Mission Control
+          Mission Control {hospital?.name ? `• ${hospital.name}` : ''}
         </div>
       </div>
 

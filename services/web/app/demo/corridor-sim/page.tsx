@@ -16,6 +16,7 @@ import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useCorridorSimulation } from '../../../hooks/useCorridorSimulation';
+import { useHospitalVerification } from '../../../hooks/useHospitalVerification';
 import { APIProvider } from '@vis.gl/react-google-maps';
 
 const CorridorSimMap = dynamic(
@@ -47,6 +48,7 @@ const DESTINATION_NAME = 'Tender Palm Hospital';
 
 export default function CorridorSimPage() {
   const sim = useCorridorSimulation();
+  const { hospital, isLoaded } = useHospitalVerification();
   const [speed, setSpeed] = useState(1);
   const router = useRouter();
 
@@ -70,6 +72,25 @@ export default function CorridorSimPage() {
     });
     router.push(`/demo/rewards-settlement?${params.toString()}`);
   }, [sim.distanceMeters, sim.isEmergencyMode, router]);
+
+  if (!isLoaded) {
+    return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0c0c1a', color: '#fff' }}>Loading verification context...</div>;
+  }
+
+  if (!hospital || hospital.status !== 'VERIFIED') {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0c0c1a', color: '#fff', textAlign: 'center' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#ef4444', marginBottom: '16px' }}>Access Restricted &mdash; Verification Required</h1>
+        <p style={{ color: 'rgba(255,255,255,0.7)', marginBottom: '24px', maxWidth: '400px' }}>Only verified hospitals are granted access to emergency corridor operations.</p>
+        <button
+          onClick={() => router.push('/demo/verification')}
+          style={{ padding: '12px 24px', background: '#3b82f6', color: '#fff', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          Return to Verification
+        </button>
+      </div>
+    );
+  }
 
   return (
     <>

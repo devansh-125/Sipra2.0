@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { IndianRupee, WalletCards } from 'lucide-react';
 import { Button } from '../../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../components/ui/card';
@@ -10,6 +10,7 @@ import { FALLBACK_DESTINATION, FALLBACK_ORIGIN } from '../../../lib/routing';
 import { buildRewardsSettlement } from '../../../lib/rewardsSettlement';
 import type { RewardSettlement } from '../../../lib/rewardsSettlement';
 import type { GeoPoint } from '../../../lib/types';
+import { useHospitalVerification } from '../../../hooks/useHospitalVerification';
 import dynamic from 'next/dynamic';
 
 const GemmaRewardsPanel = dynamic(
@@ -47,7 +48,9 @@ function parsePoint(lat: string | null, lng: string | null, fallback: GeoPoint):
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function RewardsSettlementPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const { hospital, isLoaded } = useHospitalVerification();
   const tripId = searchParams.get('tripId') ?? process.env.NEXT_PUBLIC_DEMO_TRIP_ID ?? 'demo-trip-001';
   const destination = parsePoint(
     searchParams.get('destinationLat'),
@@ -114,6 +117,25 @@ export default function RewardsSettlementPage() {
     );
   }
 
+  if (!isLoaded) {
+    return <main style={{ height: '100vh' }} className="bg-background flex items-center justify-center text-white">Loading verification context...</main>;
+  }
+
+  if (!hospital || hospital.status !== 'VERIFIED') {
+    return (
+      <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0c0c1a', color: '#fff', textAlign: 'center' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#ef4444', marginBottom: '16px' }}>Access Restricted &mdash; Verification Required</h1>
+        <p style={{ color: 'rgba(255,255,255,0.7)', marginBottom: '24px', maxWidth: '400px' }}>Only verified hospitals are granted access to the reward settlement view.</p>
+        <button
+          onClick={() => router.push('/demo/verification')}
+          style={{ padding: '12px 24px', background: '#3b82f6', color: '#fff', borderRadius: '8px', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          Return to Verification
+        </button>
+      </main>
+    );
+  }
+
   // ── Full render ───────────────────────────────────────────────────────────
   return (
     // height:100vh + overflowY:auto makes this element its own scroll container,
@@ -128,7 +150,7 @@ export default function RewardsSettlementPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
-              SIPRA — Rewards Settlement
+              SIPRA — Rewards Settlement • {hospital.name}
             </p>
             <h1 className="text-2xl font-semibold tracking-tight">Red-Zone Driver Rewards Ledger</h1>
             <p className="text-sm text-muted-foreground">

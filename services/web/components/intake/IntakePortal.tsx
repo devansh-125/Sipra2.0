@@ -71,11 +71,8 @@ export default function IntakePortal() {
 
   function handleDemoLaunch() {
     TrustLedger.clear();
-    TrustLedger.addEvent('DEMO-MISSION', 'Hospital Registration', 'Medanta Hospital', { authStatus: 'Verified', doctorId: 'DR.SMITH' });
-    TrustLedger.addEvent('DEMO-MISSION', 'OTP Verification', 'System Auth', { method: 'Biometric/OTP', result: 'Success' });
-    TrustLedger.addEvent('DEMO-MISSION', 'Hospital Approval', 'Chief Medical Officer', { approvalType: 'Emergency Transit' });
-    TrustLedger.addEvent('DEMO-MISSION', 'Mission Creation', 'SIPRA Core', { transport: 'Hybrid Ambulance+Drone' });
-    router.push('/demo/corridor-sim');
+    TrustLedger.addEvent('DEMO-MISSION', 'System Initialization', 'SIPRA Core', { info: 'Preparing identity verification module' });
+    router.push('/demo/verification');
   }
 
   return (
@@ -173,7 +170,7 @@ export default function IntakePortal() {
             className="w-full bg-transparent border border-blue-500/50 hover:border-blue-400 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300 shadow-[0_0_20px_-8px_rgba(59,130,246,0.5)] hover:shadow-[0_0_25px_-5px_rgba(59,130,246,0.6)] uppercase tracking-[0.2em] font-semibold py-6 transition-all duration-200"
           >
             <Zap className="w-4 h-4 mr-2" />
-            Launch Hackathon Demo (Simulation)
+            Demo Hackathon
           </Button>
 
         </form>
