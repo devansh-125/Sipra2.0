@@ -18,7 +18,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Map, useMap } from '@vis.gl/react-google-maps';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
-import { ScatterplotLayer, PathLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, PathLayer, IconLayer } from '@deck.gl/layers';
+import { ScenegraphLayer } from '@deck.gl/mesh-layers';
 import type { Layer, Position } from '@deck.gl/core';
 
 import {
@@ -167,6 +168,13 @@ function MapScene({
       return distM <= CULL_RADIUS_M;
     });
   }, [drivers, ambulancePosition]);
+
+  const activeVehiclePosition = useMemo(() => {
+    return isEmergencyMode && (emergencyPhase === 'transfer' || emergencyPhase === 'drone-flight' || emergencyPhase === 'arrived')
+      ? dronePosition
+      : ambulancePosition;
+  }, [isEmergencyMode, emergencyPhase, dronePosition, ambulancePosition]);
+
   const map = useMap();
   const didFitRef = useRef(false);
   const pulseAlpha = usePulseAlpha(2500);
@@ -247,7 +255,7 @@ function MapScene({
   const exclusionLayer = useMemo(() => {
     return new ScatterplotLayer({
       id: 'sim-exclusion-zone',
-      data: [ambulancePosition],
+      data: [activeVehiclePosition],
       getPosition: (d: GeoPoint) => [d.lng, d.lat],
       getRadius: 2000,
       radiusUnits: 'meters',
@@ -259,13 +267,13 @@ function MapScene({
       pickable: false,
       transitions: { getPosition: { duration: 400 } },
     });
-  }, [ambulancePosition, pulseAlpha]);
+  }, [activeVehiclePosition, pulseAlpha]);
 
   // ── 3km Alert Ring ────────────────────────────────────────────────────
   const alertRingLayer = useMemo(() => {
     return new ScatterplotLayer({
       id: 'sim-alert-ring',
-      data: [ambulancePosition],
+      data: [activeVehiclePosition],
       getPosition: (d: GeoPoint) => [d.lng, d.lat],
       getRadius: 3000,
       radiusUnits: 'meters',
@@ -277,10 +285,14 @@ function MapScene({
       pickable: false,
       transitions: { getPosition: { duration: 400 } },
     });
-  }, [ambulancePosition]);
+  }, [activeVehiclePosition]);
 
   // ── Ambulance marker ──────────────────────────────────────────────────
   const ambulanceLayer = useMemo(() => {
+    // Hide ambulance once drone takes over
+    if (isEmergencyMode && emergencyPhase !== 'none' && emergencyPhase !== 'ambulance-to-midpoint') {
+      return null;
+    }
     return new ScatterplotLayer({
       id: 'sim-ambulance',
       data: [ambulancePosition],
@@ -295,22 +307,22 @@ function MapScene({
       pickable: false,
       transitions: { getPosition: { duration: 300 } },
     });
-  }, [ambulancePosition]);
+  }, [ambulancePosition, isEmergencyMode, emergencyPhase]);
 
-  // ── Ambulance inner dot (red cross effect) ────────────────────────────
+  // ── Ambulance inner dot (red cross effect / organ marker) ──────────────
   const ambulanceInnerLayer = useMemo(() => {
     return new ScatterplotLayer({
       id: 'sim-ambulance-inner',
-      data: [ambulancePosition],
+      data: [activeVehiclePosition],
       getPosition: (d: GeoPoint) => [d.lng, d.lat],
-      getRadius: 6,
+      getRadius: 8, // slightly larger to clearly show it tracks the drone
       getFillColor: [220, 0, 0, 255],
       radiusUnits: 'pixels',
       stroked: false,
       pickable: false,
       transitions: { getPosition: { duration: 300 } },
     });
-  }, [ambulancePosition]);
+  }, [activeVehiclePosition]);
 
   // ── Driver dots (only visible / culled drivers are rendered) ───────────
   const driverLayer = useMemo(() => {
@@ -381,17 +393,17 @@ function MapScene({
   const hospitalDestLayer = useMemo(() => {
     if (routePoints.length === 0) return null;
     const dest = routePoints[routePoints.length - 1];
-    return new ScatterplotLayer({
+    return new IconLayer({
       id: 'sim-hospital-dest',
       data: [dest],
       getPosition: (d: GeoPoint) => [d.lng, d.lat],
-      getRadius: 20,
-      getFillColor: [239, 68, 68, 230],
-      getLineColor: [255, 255, 255, 255],
-      getLineWidth: 3,
-      lineWidthUnits: 'pixels',
-      radiusUnits: 'pixels',
-      stroked: true,
+      getIcon: () => ({
+        url: '/hospital-cross.svg',
+        width: 64,
+        height: 64,
+        anchorY: 32,
+      }),
+      getSize: 40,
       pickable: false,
     });
   }, [routePoints]);
@@ -453,18 +465,14 @@ function MapScene({
   const droneBodyLayer = useMemo(() => {
     if (!isEmergencyMode) return null;
     if (emergencyPhase === 'none' || emergencyPhase === 'ambulance-to-midpoint') return null;
-    return new ScatterplotLayer({
+    return new ScenegraphLayer({
       id: 'sim-drone-body',
       data: [dronePosition],
-      getPosition: (d: GeoPoint) => [d.lng, d.lat],
-      getRadius: 18,
-      getFillColor: [139, 92, 246, 255],  // vivid purple
-      getLineColor: [216, 180, 254, 255], // lighter purple ring
-      getLineWidth: 3,
-      lineWidthUnits: 'pixels',
-      radiusUnits: 'pixels',
-      stroked: true,
-      pickable: false,
+      scenegraph: '/drone.glb',
+      getPosition: (d: GeoPoint) => [d.lng, d.lat, 50],
+      getOrientation: [0, 0, 90],
+      sizeScale: 150,
+      _lighting: 'pbr',
       transitions: { getPosition: { duration: 180 } },
     });
   }, [isEmergencyMode, emergencyPhase, dronePosition]);

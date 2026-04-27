@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GeoPoint } from '../lib/types';
 import { decodePolyline } from '../lib/routing';
+import { TrustLedger } from '../lib/trustLedger';
 
 // ---------------------------------------------------------------------------
 // Lucknow hospital pair
@@ -492,6 +493,8 @@ export function useCorridorSimulation(): CorridorSimState {
           setEmergencyPhase('arrived');
           emergencyPhaseRef.current = 'arrived';
           setIsRunning(false);
+          TrustLedger.addEvent('DEMO-MISSION', 'Hospital Delivery', 'Aero-Receiver', { method: 'Drone', status: 'Success' });
+          TrustLedger.addEvent('DEMO-MISSION', 'Mission Completion', 'SIPRA Core', { totalTime: '14 min' });
         }
         return next;
       });
@@ -515,6 +518,7 @@ export function useCorridorSimulation(): CorridorSimState {
       setEmergencyPhase('transfer');
       emergencyPhaseRef.current = 'transfer';
       setIsRunning(false);
+      TrustLedger.addEvent('DEMO-MISSION', 'Midpoint Handoff', 'Ambulance Driver', { action: 'Arrived at Landing Zone' });
       return;
     }
 
@@ -629,6 +633,8 @@ export function useCorridorSimulation(): CorridorSimState {
     // Auto-stop at end (normal mode only)
     if (nextIdx >= routePoints.length - 1 && phase === 'none') {
       setIsRunning(false);
+      TrustLedger.addEvent('DEMO-MISSION', 'Hospital Delivery', 'Ambulance Crew', { method: 'Road', status: 'Success' });
+      TrustLedger.addEvent('DEMO-MISSION', 'Mission Completion', 'SIPRA Core', { routeStatus: 'Cleared' });
     }
   }, [routePoints, fetchEscapeRoute]);
 
@@ -656,6 +662,8 @@ export function useCorridorSimulation(): CorridorSimState {
       setEmergencyPhase('drone-flight');
       emergencyPhaseRef.current = 'drone-flight';
       setIsRunning(true); // restart interval for drone animation
+      TrustLedger.addEvent('DEMO-MISSION', 'Drone Transfer', 'Ground Crew', { status: 'Secured in Cargo Pod' });
+      TrustLedger.addEvent('DEMO-MISSION', 'Drone Activation', 'Air Traffic Control', { clearance: 'Approved', altitude: '400ft' });
     }, 3500);
     return () => clearTimeout(timer);
   }, [emergencyPhase]);
@@ -667,6 +675,10 @@ export function useCorridorSimulation(): CorridorSimState {
     if (idxRef.current >= routePoints.length - 1) {
       idxRef.current = 0;
       setAmbulanceIdx(0);
+    }
+    if (idxRef.current === 0) {
+      TrustLedger.addEvent('DEMO-MISSION', 'Ambulance Dispatch', 'Fleet Manager', { transportId: 'AMB-001', priority: 'Code Red' });
+      TrustLedger.addEvent('DEMO-MISSION', 'Organ Pickup', 'Medical Loadmaster', { payload: 'Critical Organ', condition: 'Viable' });
     }
     setIsRunning(true);
   }, [routePoints]);
@@ -712,6 +724,8 @@ export function useCorridorSimulation(): CorridorSimState {
     const midIdx = Math.floor((routePoints.length - 1) / 2);
     setIsEmergencyMode(true);
     setDroneProgress(0);
+    TrustLedger.addEvent('DEMO-MISSION', 'Red Alert Triggered', 'System AI', { override: 'Drone Swap Initiated' });
+
     if (idxRef.current >= midIdx) {
       // Already at/past midpoint — jump straight to transfer
       setEmergencyPhase('transfer');

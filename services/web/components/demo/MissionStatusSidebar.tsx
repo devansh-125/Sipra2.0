@@ -6,10 +6,21 @@
  * Left column of the three-panel Mission Control demo layout.
  * Shows golden hour countdown, active mission details, sim controls,
  * and live statistics — all driven by the shared CorridorSimState.
+ *
+ * Also hosts:
+ *  - GemmaAIPanel      (AI Mission Control card)
+ *  - GemmaAnalyticsPanel (interactive analytics button grid + modals)
+ *  - DroneIntelligencePopup (fullscreen overlay on emergency)
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import type { CorridorSimState } from '../../hooks/useCorridorSimulation';
+import { buildRewardsSettlement } from '../../lib/rewardsSettlement';
+
+const GemmaAIPanel = dynamic(() => import('./GemmaAIPanel'), { ssr: false });
+const GemmaAnalyticsPanel = dynamic(() => import('./GemmaAnalyticsPanel'), { ssr: false });
+const DroneIntelligencePopup = dynamic(() => import('./DroneIntelligencePopup'), { ssr: false });
 
 // ---------------------------------------------------------------------------
 // Golden hour helpers
@@ -77,6 +88,25 @@ export default function MissionStatusSidebar({
 
   // tick is used only to force a re-render each second for the countdown
   void tick;
+
+  // ── Build deterministic settlement for analytics panel data ────────────────
+  const settlement = useMemo(
+    () => buildRewardsSettlement({ tripId: 'demo-sidebar', distanceMeters: sim.distanceMeters || 16800 }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sim.distanceMeters],
+  );
+
+  // Map settlement drivers → analytics driver rows with alertOffset/redZone
+  const analyticsDrivers = useMemo(
+    () =>
+      settlement.drivers.map((d) => ({
+        driverId: d.driverId,
+        rewardRupees: d.rewardRupees,
+        alertOffsetMin: Math.round((Date.now() - d.redAlertAt.getTime()) / 60_000),
+        redZoneDurationMin: Math.round((d.movedOutAt.getTime() - d.redAlertAt.getTime()) / 60_000),
+      })),
+    [settlement.drivers],
+  );
 
   return (
     <div
@@ -372,6 +402,29 @@ export default function MissionStatusSidebar({
           </span>
         </div>
 
+        {/* ── AI Mission Control (GemmaAIPanel) ────── */}
+        <GemmaAIPanel
+          progress={sim.progress}
+          distanceMeters={sim.distanceMeters || 16800}
+          droneActivated={sim.isEmergencyMode}
+          driversInZone={sim.driversInZone}
+          tripDone={tripDone}
+        />
+
+        {/* ── AI Mission Analytics Panel ──────────── */}
+        <GemmaAnalyticsPanel
+          progress={sim.progress}
+          distanceMeters={sim.distanceMeters || 16800}
+          droneActivated={sim.isEmergencyMode}
+          driversInZone={sim.driversInZone}
+          drivers={analyticsDrivers}
+          rewardsSubtotal={settlement.rewardsSubtotal}
+          distanceFee={settlement.distanceFee}
+          platformCharge={settlement.platformCharge}
+          complianceFee={settlement.complianceFee}
+          totalPayable={settlement.totalPayable}
+        />
+
         {/* ── View Reward Summary ───────────────────── */}
         <button
           id="view-reward-summary-btn"
@@ -407,6 +460,13 @@ export default function MissionStatusSidebar({
 
         <style>{`@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.5 } }`}</style>
       </div>
+
+      {/* ── Drone Intelligence Popup (fullscreen overlay) ── */}
+      <DroneIntelligencePopup
+        isEmergencyMode={sim.isEmergencyMode}
+        emergencyPhase={sim.emergencyPhase}
+        distanceMeters={sim.distanceMeters || 16800}
+      />
     </div>
   );
 }

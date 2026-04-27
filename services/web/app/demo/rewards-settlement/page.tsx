@@ -10,6 +10,12 @@ import { FALLBACK_DESTINATION, FALLBACK_ORIGIN } from '../../../lib/routing';
 import { buildRewardsSettlement } from '../../../lib/rewardsSettlement';
 import type { RewardSettlement } from '../../../lib/rewardsSettlement';
 import type { GeoPoint } from '../../../lib/types';
+import dynamic from 'next/dynamic';
+
+const GemmaRewardsPanel = dynamic(
+  () => import('../../../components/demo/GemmaRewardsPanel'),
+  { ssr: false },
+);
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -50,8 +56,9 @@ export default function RewardsSettlementPage() {
   );
   const distanceMeters = Number(searchParams.get('distanceMeters') ?? '16800') || 16800;
 
+  const droneActivated = searchParams.get('droneActivated') === 'true';
+
   // Name passed directly from the corridor-sim page via URL param (most reliable).
-  // Falls back to async reverse-geocoding via the hook, then to the static label.
   const paramName = searchParams.get('destinationName') ?? '';
   const [destinationName, setDestinationName] = useState(paramName || 'Tender Palm Hospital');
 
@@ -81,10 +88,19 @@ export default function RewardsSettlementPage() {
   const [settlement, setSettlement] = useState<RewardSettlement | null>(null);
 
   useEffect(() => {
-    setSettlement(buildRewardsSettlement({ tripId, distanceMeters }));
-    // Only rebuild when these identifiers actually change
+    const data = buildRewardsSettlement({ tripId, distanceMeters });
+    setSettlement(data);
+
+    // Log to Trust Ledger on settlement creation
+    import('../../../lib/trustLedger').then(({ TrustLedger }) => {
+      TrustLedger.addEvent('DEMO-MISSION', 'Driver Reward Creation', 'Smart Contract', { driversRewarded: data.drivers.length, amount: rupees(data.rewardsSubtotal) });
+      TrustLedger.addEvent('DEMO-MISSION', 'Payment Generation', 'Billing Engine', { total: rupees(data.totalPayable), status: 'Pending' });
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId, distanceMeters]);
+
+  // suppress unused import warning
+  void FALLBACK_ORIGIN;
 
   // ── Loading skeleton while data generates on client ───────────────────────
   if (!settlement) {
@@ -263,6 +279,21 @@ export default function RewardsSettlementPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* ── Gemma AI Panels ── */}
+        <GemmaRewardsPanel
+          tripId={tripId}
+          distanceMeters={distanceMeters}
+          drivers={settlement.drivers}
+          rewardsSubtotal={settlement.rewardsSubtotal}
+          distanceFee={settlement.distanceFee}
+          platformCharge={settlement.platformCharge}
+          complianceFee={settlement.complianceFee}
+          totalPayable={settlement.totalPayable}
+          destinationName={destinationName}
+          droneActivated={droneActivated}
+        />
+
       </div>
     </main>
   );

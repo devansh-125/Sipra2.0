@@ -33,6 +33,11 @@ const SimDriverPhone = dynamic(
   { ssr: false },
 );
 
+const MissionTrustLedger = dynamic(
+  () => import('../../../components/demo/MissionTrustLedger'),
+  { ssr: false },
+);
+
 const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
 // Tender Palm Hospital — destination used by the corridor sim
@@ -61,9 +66,10 @@ export default function CorridorSimPage() {
       destinationLat: String(DESTINATION_LAT),
       destinationLng: String(DESTINATION_LNG),
       destinationName: DESTINATION_NAME,
+      droneActivated: String(sim.isEmergencyMode),
     });
     router.push(`/demo/rewards-settlement?${params.toString()}`);
-  }, [sim.distanceMeters, router]);
+  }, [sim.distanceMeters, sim.isEmergencyMode, router]);
 
   return (
     <>
@@ -87,25 +93,34 @@ export default function CorridorSimPage() {
             margin: 0,
             padding: 0,
             display: 'grid',
-            gridTemplateColumns: '20% 1fr 20%',
+            gridTemplateColumns: 'minmax(280px, 18%) 1fr minmax(320px, 20%) minmax(320px, 23%)',
             background: '#0c0c1a',
           }}
         >
           {/* Left Column — Mission Status */}
-          <MissionStatusSidebar
-            sim={sim}
-            speed={speed}
-            onSpeedChange={handleSpeedChange}
-            onViewRewards={handleViewRewards}
-          />
+          <div className="custom-scrollbar" style={{ overflowY: 'auto', height: '100vh' }}>
+            <MissionStatusSidebar
+              sim={sim}
+              speed={speed}
+              onSpeedChange={handleSpeedChange}
+              onViewRewards={handleViewRewards}
+            />
+          </div>
 
           {/* Center Column — Corridor Map */}
-          <main style={{ position: 'relative', overflow: 'hidden' }}>
+          <main style={{ position: 'relative', overflow: 'hidden', height: '100vh' }}>
             <CorridorSimMap apiKey={apiKey} sim={sim} embedded />
           </main>
 
           {/* Right Column — Driver Phone */}
-          <SimDriverPhone sim={sim} />
+          <div className="custom-scrollbar" style={{ overflowY: 'auto', height: '100vh', display: 'flex', justifyContent: 'center' }}>
+            <SimDriverPhone sim={sim} />
+          </div>
+
+          {/* Far Right Column — Trust Ledger */}
+          <div className="custom-scrollbar" style={{ overflowY: 'auto', height: '100vh' }}>
+            <MissionTrustLedger />
+          </div>
         </div>
       </APIProvider>
     </>
