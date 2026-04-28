@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: sipra-core
+    env: docker
+    dockerfilePath: ./services/core-go/Dockerfile
+    dockerContext: ./services/core-go
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false           # paste Supabase connection string
+      - key: REDIS_URL
+        sync: false           # paste Upstash rediss:// URL
+      - key: AI_BRAIN_URL
+        sync: false           # paste sipra-ai-brain.onrender.com URL after first deploy
+      - key: MOCK_DRONE_URL
+        sync: false           # paste sipra-drone-dispatch.onrender.com URL after first deploy
+      - key: VALHALLA_URL
+        value: http://disabled:8002   # valhalla not on free tier; chaos/sim endpoints gracefully fail
+      - key: CHAOS_ENABLED
+        value: "true"
+
+  - type: web
+    name: sipra-ai-brain
+    env: docker
+    dockerfilePath: ./services/ai-brain/Dockerfile
+    dockerContext: ./services/ai-brain
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+
+  - type: web
+    name: sipra-fleet-receiver
+    env: docker
+    dockerfilePath: ./services/mocks/fleet-receiver/Dockerfile
+    dockerContext: ./services/mocks/fleet-receiver
+    plan: free
+    healthCheckPath: /healthz
+
+  - type: web
+    name: sipra-drone-dispatch
+    env: docker
+    dockerfilePath: ./services/mocks/drone-dispatch/Dockerfile
+    dockerContext: ./services/mocks/drone-dispatch
+    plan: free
+    healthCheckPath: /healthz

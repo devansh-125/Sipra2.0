@@ -38,6 +38,49 @@ services:
     networks:
       - sipra-net
 
+  core-go:
+    build:
+      context: ./services/core-go
+      dockerfile: Dockerfile
+    container_name: sipra-core-go
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://sipra:sipra_dev@postgres:5432/sipra?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      AI_BRAIN_URL: http://ai-brain:8000
+      MOCK_DRONE_URL: http://drone-dispatch:4003
+      VALHALLA_URL: http://valhalla:8002
+      CHAOS_ENABLED: "true"
+      LOG_LEVEL: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sipra-net
+
+  web:
+    build:
+      context: ./services/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+        NEXT_PUBLIC_BACKEND_WS_URL: ws://localhost:8080/ws/dashboard
+        NEXT_PUBLIC_BACKEND_HTTP_URL: http://localhost:8080
+        NEXT_PUBLIC_SIM_WS_URL: ws://localhost:4001
+        NEXT_PUBLIC_CHAOS_ENABLED: "true"
+    container_name: sipra-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - core-go
+    networks:
+      - sipra-net
+
   ai-brain:
     build:
       context: ./services/ai-brain
