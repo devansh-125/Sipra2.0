@@ -23,7 +23,7 @@ import type { GeoPoint } from '../lib/types';
 
 const STALE_THRESHOLD_MS = 2_000;
 const TICK_MS = 500;
-const MIN_ETA_SECONDS = 60;
+const MIN_ETA_SECONDS = 300;
 
 // ---------------------------------------------------------------------------
 // Distance helpers
@@ -178,6 +178,11 @@ export function useAmbulanceAnimation(
   // Fallback tick — advance along polyline by distance proportional to elapsed time.
   useEffect(() => {
     if (polyline.length < 2 || totalM <= 0) return;
+    // Wait for the route to load before interpolating — etaSeconds=0 means the
+    // route API hasn't responded yet; using MIN_ETA as fallback here would
+    // cause the marker to sprint to the destination in 5 min regardless of
+    // actual route length.
+    if (etaSeconds <= 0) return;
     const eta = Math.max(MIN_ETA_SECONDS, etaSeconds);
 
     const id = setInterval(() => {

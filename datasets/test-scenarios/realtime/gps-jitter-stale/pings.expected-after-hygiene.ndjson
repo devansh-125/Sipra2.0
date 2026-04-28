@@ -1,0 +1,16 @@
+{"lat":12.9587,"lng":77.6442,"speed_kph":22,"heading_deg":315,"accuracy_m":7,"recorded_at":"__T+0s__","kept":"valid baseline"}
+{"lat":12.9620,"lng":77.6400,"speed_kph":35,"heading_deg":313,"accuracy_m":7,"recorded_at":"__T+60s__","kept":"valid"}
+{"lat":12.9660,"lng":77.6350,"speed_kph":50,"heading_deg":311,"accuracy_m":7,"recorded_at":"__T+120s__","kept":"valid"}
+{"lat":12.9700,"lng":77.6300,"speed_kph":62,"heading_deg":310,"accuracy_m":7,"recorded_at":"__T+180s__","kept":"valid"}
+{"lat":12.9740,"lng":77.6240,"speed_kph":70,"heading_deg":308,"accuracy_m":8,"recorded_at":"__T+240s__","kept":"valid"}
+{"lat":12.9800,"lng":77.6160,"speed_kph":75,"heading_deg":308,"accuracy_m":12,"recorded_at":"__T+285s__","kept":"recovered after tunnel — 3 stuck dups dropped"}
+{"lat":12.9860,"lng":77.6080,"speed_kph":78,"heading_deg":307,"accuracy_m":9,"recorded_at":"__T+345s__","kept":"valid"}
+{"lat":12.9920,"lng":77.6000,"speed_kph":80,"heading_deg":307,"accuracy_m":9,"recorded_at":"__T+405s__","kept":"valid"}
+{"lat":12.9980,"lng":77.5920,"speed_kph":82,"heading_deg":306,"accuracy_m":9,"recorded_at":"__T+475s__","kept":"valid recovery — OOB lat at +465s dropped"}
+{"lat":13.0100,"lng":77.5760,"speed_kph":80,"heading_deg":305,"accuracy_m":9,"recorded_at":"__T+595s__","kept":"position valid; speed clamped from 312 to 80 (rolling avg)"}
+{"lat":13.0160,"lng":77.5680,"speed_kph":80,"heading_deg":305,"accuracy_m":9,"recorded_at":"__T+655s__","kept":"valid"}
+{"lat":13.0220,"lng":77.5600,"speed_kph":80,"heading_deg":304,"accuracy_m":9,"recorded_at":"__T+715s__","kept":"valid"}
+{"lat":13.0280,"lng":77.5520,"speed_kph":78,"heading_deg":304,"accuracy_m":9,"recorded_at":"__T+775s__","kept":"valid"}
+{"lat":13.0340,"lng":77.5440,"speed_kph":78,"heading_deg":304,"accuracy_m":9,"recorded_at":"__T+835s__","kept":"valid"}
+{"lat":13.0460,"lng":77.5280,"speed_kph":78,"heading_deg":303,"accuracy_m":9,"recorded_at":"__T+895s__","kept":"valid; recorded_at clamped from +1015s to +895s (server time minus reasonable network delay)"}
+{"lat":13.0520,"lng":77.5200,"speed_kph":78,"heading_deg":303,"accuracy_m":9,"recorded_at":"__T+955s__","kept":"valid recovery"}

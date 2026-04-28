@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ShieldCheck, Loader2, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { createTrip } from '@/lib/api';
+import { createTrip, startTrip } from '@/lib/api';
 import { HOSPITALS } from './hospitals';
 
 const CARGO_OPTIONS = ['Liver', 'Heart', 'Volatile Vaccine', 'Blood Platelets'] as const;
@@ -68,8 +68,25 @@ export default function IntakePortal() {
     }
   }
 
-  function handleDemoLaunch() {
-    router.push('/dashboard');
+  async function handleDemoLaunch() {
+    setSubmitting(true);
+    try {
+      // Victoria Hospital → Manipal HAL, Bangalore — matches run-demo-scenario.ts BANGALORE preset
+      const res = await createTrip({
+        origin:               { lat: 12.9656, lng: 77.5713 },
+        destination:          { lat: 12.9587, lng: 77.6442 },
+        cargo_category:       'Organ',
+        cargo_description:    'Kidney for transplant — hackathon demo',
+        golden_hour_deadline: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+        ambulance_id:         'AMB-DEMO-01',
+        hospital_dispatch_id: 'Victoria Hospital, Bengaluru',
+      });
+      await startTrip(res.trip_id);
+      router.push(`/dashboard?tripId=${res.trip_id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to launch demo');
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -164,10 +181,11 @@ export default function IntakePortal() {
           <Button
             type="button"
             onClick={handleDemoLaunch}
+            disabled={submitting}
             className="w-full bg-transparent border border-blue-500/50 hover:border-blue-400 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300 shadow-[0_0_20px_-8px_rgba(59,130,246,0.5)] hover:shadow-[0_0_25px_-5px_rgba(59,130,246,0.6)] uppercase tracking-[0.2em] font-semibold py-6 transition-all duration-200"
           >
             <Zap className="w-4 h-4 mr-2" />
-            Launch Hackathon Demo (Simulation)
+            Launch Hackathon Demo
           </Button>
 
         </form>

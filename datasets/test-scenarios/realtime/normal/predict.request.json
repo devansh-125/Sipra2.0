@@ -1,0 +1,9 @@
+{
+  "trip_id": "00000001-0000-4000-8000-000000000001",
+  "current_lat": 13.0000,
+  "current_lng": 77.5950,
+  "destination_lat": 13.3379,
+  "destination_lng": 77.1031,
+  "golden_hour_deadline": "__DYNAMIC_PLUS_115_MIN__",
+  "avg_speed_kph": 75
+}

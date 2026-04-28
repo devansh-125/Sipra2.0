@@ -1,0 +1,18 @@
+{
+  "trip_id": "00000007-0000-4000-8000-000000000007",
+  "cargo_category": "Organ",
+  "cargo_description": "Liver transplant — Donor BLR-LL-0918",
+  "origin": { "lat": 12.9587, "lng": 77.6442, "name": "Manipal Hospital HAL, Bangalore" },
+  "destination": { "lat": 13.3379, "lng": 77.1031, "name": "Sri Siddhartha Medical College, Tumkur" },
+  "golden_hour_minutes": 120,
+  "golden_hour_deadline": "__DYNAMIC__",
+  "ambulance_id": "AMB-SPIKE-09",
+  "hospital_dispatch_id": "Manipal-HAL-BLR",
+  "tolerance_celsius": 4.0,
+  "dispatch_context": {
+    "time_of_day": "afternoon",
+    "local_time_hint": "14:15 IST",
+    "weather": "clear",
+    "expected_route": "NH-48 — accident at Dabaspete around minute 18"
+  }
+}

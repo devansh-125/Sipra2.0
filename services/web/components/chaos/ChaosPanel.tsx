@@ -40,6 +40,7 @@ const TYPE_COLOR: Record<string, string> = {
   HANDOFF_INITIATED: 'text-red-400',
   FLEET_UPDATE: 'text-green-400',
   FLEET_SPAWN: 'text-yellow-400',
+  REROUTE_STATUS: 'text-emerald-400',
 };
 
 function fmtTime(ts: number) {
@@ -60,8 +61,8 @@ export default function ChaosPanel() {
 
   // Spawn Fleet form
   const [fleetCount, setFleetCount] = useState(100);
-  const [fleetLat, setFleetLat] = useState(12.9716);
-  const [fleetLng, setFleetLng] = useState(77.5946);
+  const [fleetLat, setFleetLat] = useState(12.9656);  // Bangalore origin
+  const [fleetLng, setFleetLng] = useState(77.5713);
   const [fleetRadius, setFleetRadius] = useState(2000);
 
   // Force Handoff form
@@ -93,15 +94,20 @@ export default function ChaosPanel() {
   }
 
   async function runSpawnFleet() {
+    if (!tripId) {
+      toast.error('Set a trip ID first');
+      return;
+    }
     setBusy(true);
     try {
       const res = await chaosSpawnFleet({
+        trip_id: tripId,
         count: fleetCount,
         center_lat: fleetLat,
         center_lng: fleetLng,
         radius_m: fleetRadius,
       });
-      toast.success(`Fleet spawned: ${res.spawned} vehicles`);
+      toast.success(`Fleet spawned: ${res.spawned} drivers rerouting`);
       close();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Spawn fleet failed');
@@ -174,8 +180,8 @@ export default function ChaosPanel() {
           />
           <ScenarioButton
             icon={<Car className="h-6 w-6 text-green-400" />}
-            title="Spawn 100 Fleet"
-            description="Broadcast a synthetic vehicle grid into the corridor area via FLEET_SPAWN."
+            title="Spawn & Evacuate Fleet"
+            description="Spawn drivers, animate reroute acceptance, and complete bounty payouts."
             onClick={() => setActiveDialog('fleet')}
           />
           <ScenarioButton
@@ -282,12 +288,12 @@ export default function ChaosPanel() {
           <DialogHeader>
             <DialogTitle>Spawn Fleet</DialogTitle>
             <DialogDescription>
-              Place synthetic vehicles in a grid near a given coordinate.
+              Place synthetic drivers near the red zone and animate them out for bounty completion.
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-3 py-2">
             <label className="block text-sm">
-              <span className={LABEL_CLS}>Count (1–500)</span>
+              <span className={LABEL_CLS}>Drivers (1–500)</span>
               <input
                 type="number"
                 min={1}
@@ -334,7 +340,7 @@ export default function ChaosPanel() {
               Cancel
             </Button>
             <Button onClick={runSpawnFleet} disabled={busy}>
-              {busy ? 'Spawning…' : 'Spawn Vehicles'}
+              {busy ? 'Spawning…' : 'Spawn & Evacuate'}
             </Button>
           </DialogFooter>
         </DialogContent>

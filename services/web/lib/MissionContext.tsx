@@ -31,7 +31,7 @@ import { useSipraWebSocket } from '../hooks/useSipraWebSocket';
 import { useCorridorGeometry } from '../hooks/useCorridorGeometry';
 import type { GeoPoint, Trip, TripStatus } from './types';
 import type { RouteSource } from './routing';
-import { FALLBACK_ORIGIN, FALLBACK_DESTINATION } from './routing';
+
 import type { Polygon } from 'geojson';
 
 // ---------------------------------------------------------------------------
@@ -173,12 +173,12 @@ export function MissionProvider({ children, tripId }: MissionProviderProps) {
 
   // ── Derive origin / destination ──────────────────────────────────────────
   const origin: GeoPoint | undefined = useMemo(() => {
-    if (!trip) return FALLBACK_ORIGIN;
+    if (!trip) return undefined;
     return { lat: trip.origin.lat, lng: trip.origin.lng };
   }, [trip]);
 
   const destination: GeoPoint | undefined = useMemo(() => {
-    if (!trip) return FALLBACK_DESTINATION;
+    if (!trip) return undefined;
     return { lat: trip.destination.lat, lng: trip.destination.lng };
   }, [trip]);
 

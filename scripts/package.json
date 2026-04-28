@@ -3,8 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "simulate": "tsx simulate-gps.ts",
-    "e2e:handoff": "tsx e2e-handoff.ts"
+    "simulate": "tsx ../test-tools/simulate-gps.ts",
+    "e2e:handoff": "tsx ../test-tools/e2e-handoff.ts",
+    "realtime:ingest": "tsx realtime-ingest.ts",
+    "scenario": "tsx run-demo-scenario.ts",
+    "scenario:happy": "tsx run-demo-scenario.ts --scenario=happy",
+    "scenario:drone": "tsx run-demo-scenario.ts --scenario=drone",
+    "play": "tsx play-scenario.ts",
+    "play:normal": "tsx play-scenario.ts --scenario=normal --speed=5",
+    "play:congestion": "tsx play-scenario.ts --scenario=congestion-breach --speed=5",
+    "play:spike": "tsx play-scenario.ts --scenario=sudden-spike-mid-route --speed=10",
+    "play:jitter": "tsx play-scenario.ts --scenario=gps-jitter-stale --speed=10",
+    "play:peak": "tsx play-scenario.ts --scenario=peak-hour-mg-road --speed=5",
+    "play:conflicting": "tsx play-scenario.ts --scenario=conflicting-etas"
   },
   "dependencies": {
     "ws": "^8.18.0"

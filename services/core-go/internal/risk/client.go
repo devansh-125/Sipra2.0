@@ -24,12 +24,18 @@ type PredictRequest struct {
 
 // PredictResponse mirrors the AI brain's response schema.
 type PredictResponse struct {
-	TripID                   string  `json:"trip_id"`
-	PredictedETASeconds      int     `json:"predicted_eta_seconds"`
-	DeadlineSecondsRemaining int     `json:"deadline_seconds_remaining"`
-	BreachProbability        float64 `json:"breach_probability"`
-	WillBreach               bool    `json:"will_breach"`
-	Reasoning                string  `json:"reasoning"`
+	TripID                   string   `json:"trip_id"`
+	PredictedETASeconds      int      `json:"predicted_eta_seconds"`
+	DeadlineSecondsRemaining int      `json:"deadline_seconds_remaining"`
+	BreachProbability        float64  `json:"breach_probability"`
+	WillBreach               bool     `json:"will_breach"`
+	WeatherCondition         string   `json:"weather_condition"`
+	WeatherFactor            float64  `json:"weather_factor"`
+	Reasoning                string   `json:"reasoning"`
+	AIConfidence             float64  `json:"ai_confidence"`
+	AIReasoning              string   `json:"ai_reasoning"`
+	RiskFactors              []string `json:"risk_factors"`
+	Recommendations          []string `json:"recommendations"`
 }
 
 // Predictor is the interface the Monitor uses to call the AI brain.

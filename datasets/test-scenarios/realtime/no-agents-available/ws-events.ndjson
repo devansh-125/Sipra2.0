@@ -1,0 +1,5 @@
+{"type":"FLEET_UPDATE","timestamp":"__T+0s__","payload":{"fleet":[]}}
+{"type":"GPS_UPDATE","timestamp":"__T+0s__","payload":{"trip_id":"00000005-0000-4000-8000-000000000005","ping_id":"ping-0001","lat":13.0500,"lng":77.5100,"heading_deg":304,"speed_kph":75}}
+{"type":"CORRIDOR_UPDATE","timestamp":"__T+0s__","payload":{"trip_id":"00000005-0000-4000-8000-000000000005","corridor_id":"cor-noagents-01","version":1,"buffer_meters":2000,"polygon_geojson":{"type":"Polygon","coordinates":[[[77.4920,13.0320],[77.5280,13.0320],[77.5280,13.0680],[77.4920,13.0680],[77.4920,13.0320]]]}}}
+{"type":"RISK_PREDICTION","timestamp":"__T+10s__","payload":{"trip_id":"00000005-0000-4000-8000-000000000005","predicted_eta_seconds":2350,"deadline_seconds_remaining":6300,"breach_probability":0.0,"will_breach":false,"weather_condition":"clear","weather_factor":1.0,"reasoning":"Past Peenya, expressway speed sustained.","ai_confidence":0.95,"ai_reasoning":"On track despite no partner coverage — corridor still broadcast for traffic systems.","risk_factors":[],"recommendations":["Continue current route"]}}
+{"type":"FLEET_UPDATE","timestamp":"__T+30s__","payload":{"fleet":[]}}

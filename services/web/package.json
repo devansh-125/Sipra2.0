@@ -12,6 +12,8 @@
     "@deck.gl/core": "^9.1.0",
     "@deck.gl/google-maps": "^9.1.0",
     "@deck.gl/layers": "^9.1.0",
+    "@deck.gl/mesh-layers": "^9.3.1",
+    "@loaders.gl/gltf": "^4.4.1",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",

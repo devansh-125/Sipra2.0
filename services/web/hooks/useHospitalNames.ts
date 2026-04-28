@@ -32,13 +32,29 @@ const DEFAULT_NAMES: HospitalNames = {
 /** In-memory cache: "lat,lng" → resolved name string */
 const nameCache = new Map<string, string>();
 
+// Per-point sentinel so we can invalidate the cached fallback when the caller
+// supplies a better default (e.g. the first call used 'Pickup Hospital' but
+// the next should use 'Medanta').
+const nameCacheFallback = new Map<string, string>();
+
 async function resolveHospitalName(
   point: GeoPoint,
   fallback: string,
 ): Promise<string> {
   const key = `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`;
 
-  if (nameCache.has(key)) return nameCache.get(key)!;
+  // If the cached value was only a fallback sentinel AND the caller now provides
+  // a better fallback, evict so we can try the API again (or return the better label).
+  if (nameCache.has(key) && nameCacheFallback.get(key) === nameCache.get(key)) {
+    if (fallback !== nameCacheFallback.get(key)) {
+      nameCache.delete(key);
+      nameCacheFallback.delete(key);
+    } else {
+      return nameCache.get(key)!;
+    }
+  } else if (nameCache.has(key)) {
+    return nameCache.get(key)!;
+  }
 
   try {
     const params = new URLSearchParams({
@@ -61,16 +77,19 @@ async function resolveHospitalName(
     console.warn('[useHospitalNames] lookup failed for', key, err);
   }
 
-  // Fallback — cache it too so we don't retry on every render
+  // Fallback — cache it and record it was a fallback so callers with a better
+  // label can evict it on the next render cycle.
   nameCache.set(key, fallback);
+  nameCacheFallback.set(key, fallback);
   return fallback;
 }
 
 export function useHospitalNames(
   origin: GeoPoint | undefined,
   destination: GeoPoint | undefined,
+  fallbacks: HospitalNames = DEFAULT_NAMES,
 ): HospitalNames {
-  const [names, setNames] = useState<HospitalNames>(DEFAULT_NAMES);
+  const [names, setNames] = useState<HospitalNames>(fallbacks);
 
   // Track which origin/dest key we last resolved to avoid duplicate fetches.
   const resolvedKeyRef = useRef<string | null>(null);
@@ -85,14 +104,17 @@ export function useHospitalNames(
     let cancelled = false;
 
     Promise.all([
-      resolveHospitalName(origin,      'Pickup Hospital'),
-      resolveHospitalName(destination, 'Destination Hospital'),
+      resolveHospitalName(origin,      fallbacks.originName),
+      resolveHospitalName(destination, fallbacks.destinationName),
     ]).then(([originName, destinationName]) => {
       if (!cancelled) setNames({ originName, destinationName });
     });
 
     return () => { cancelled = true; };
-  }, [origin, destination]);
+  // fallbacks is stable (object literal at call-site) — spread to avoid
+  // referential-equality churn while still reacting to value changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin, destination, fallbacks.originName, fallbacks.destinationName]);
 
   return names;
 }

@@ -1,0 +1,15 @@
+{
+  "drone_id": "SIPRA-DRONE-K72X",
+  "eta_seconds": 1080,
+  "status": "DISPATCHED",
+  "estimated_arrival_at": "__DYNAMIC_PLUS_18_MIN__",
+  "drone_metadata": {
+    "model": "Sipra-MK2",
+    "max_payload_kg": 4.5,
+    "battery_pct": 87,
+    "launch_pad_id": "BLR-PAD-03 (Yeshwantpur)",
+    "altitude_m_cruise": 120,
+    "cruise_kph": 95,
+    "route_km": 70
+  }
+}

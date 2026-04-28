@@ -6,7 +6,10 @@
 # Go
 services/core-go/vendor/
 services/core-go/bin/
+services/core-go/server
+services/core-go/server.exe
 *.exe
+.gocache/
 
 # Python
 __pycache__/
@@ -17,18 +20,27 @@ services/ai-brain/.env
 
 # Node
 node_modules/
-services/mocks/node_modules/
+services/mocks/**/node_modules/
 services/web/.next/
 services/web/node_modules/
 services/web/out/
+services/web/tsconfig.tsbuildinfo
+scripts/node_modules/
+
+# Runtime / logs
+*.log
+core-go-*.log
 
 # Docker volumes / data
 infra/volumes/
 
-# IDE
+# IDE / agent state
 .vscode/settings.json
 .idea/
 *.iml
 .claude/
+.kiro/
 
+# Internal AI brief — do not ship
 CLAUDE.md
+services/web/CLAUDE.md

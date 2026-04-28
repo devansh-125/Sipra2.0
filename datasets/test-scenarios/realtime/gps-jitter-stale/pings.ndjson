@@ -1,0 +1,25 @@
+{"lat":12.9587,"lng":77.6442,"speed_kph":22,"heading_deg":315,"accuracy_m":7,"recorded_at":"__T+0s__","note":"valid baseline"}
+{"lat":12.95883,"lng":77.6442,"speed_kph":22,"heading_deg":315,"accuracy_m":18,"recorded_at":"__T+1s__","note":"jitter +15m N"}
+{"lat":12.9587,"lng":77.64408,"speed_kph":22,"heading_deg":315,"accuracy_m":17,"recorded_at":"__T+2s__","note":"jitter -13m E"}
+{"lat":12.9587,"lng":77.6442,"speed_kph":22,"heading_deg":315,"accuracy_m":7,"recorded_at":"__T+0s__","note":"duplicate of line 1"}
+{"lat":12.9620,"lng":77.6400,"speed_kph":35,"heading_deg":313,"accuracy_m":7,"recorded_at":"__T+60s__","note":"valid"}
+{"lat":12.9660,"lng":77.6350,"speed_kph":50,"heading_deg":311,"accuracy_m":7,"recorded_at":"__T+120s__","note":"valid"}
+{"lat":12.9700,"lng":77.6300,"speed_kph":62,"heading_deg":310,"accuracy_m":7,"recorded_at":"__T+180s__","note":"valid"}
+{"lat":12.9740,"lng":77.6240,"speed_kph":70,"heading_deg":308,"accuracy_m":8,"recorded_at":"__T+240s__","note":"valid"}
+{"lat":12.9740,"lng":77.6240,"speed_kph":0,"heading_deg":308,"accuracy_m":50,"recorded_at":"__T+250s__","note":"stuck device — tunnel"}
+{"lat":12.9740,"lng":77.6240,"speed_kph":0,"heading_deg":308,"accuracy_m":50,"recorded_at":"__T+260s__","note":"stuck device dup"}
+{"lat":12.9740,"lng":77.6240,"speed_kph":0,"heading_deg":308,"accuracy_m":50,"recorded_at":"__T+270s__","note":"stuck device dup"}
+{"lat":12.9800,"lng":77.6160,"speed_kph":75,"heading_deg":308,"accuracy_m":12,"recorded_at":"__T+285s__","note":"recovered — 600m jump"}
+{"lat":12.9860,"lng":77.6080,"speed_kph":78,"heading_deg":307,"accuracy_m":9,"recorded_at":"__T+345s__","note":"valid"}
+{"lat":12.9920,"lng":77.6000,"speed_kph":80,"heading_deg":307,"accuracy_m":9,"recorded_at":"__T+405s__","note":"valid"}
+{"lat":99.5000,"lng":77.5920,"speed_kph":82,"heading_deg":306,"accuracy_m":250,"recorded_at":"__T+465s__","note":"OOB lat — module fault"}
+{"lat":12.9980,"lng":77.5920,"speed_kph":82,"heading_deg":306,"accuracy_m":9,"recorded_at":"__T+475s__","note":"valid recovery"}
+{"lat":13.0040,"lng":77.5840,"speed_kph":-12,"heading_deg":306,"accuracy_m":9,"recorded_at":"__T+535s__","note":"negative speed — sensor flip"}
+{"lat":13.0100,"lng":77.5760,"speed_kph":312,"heading_deg":305,"accuracy_m":9,"recorded_at":"__T+595s__","note":"impossible speed"}
+{"lat":13.0160,"lng":77.5680,"speed_kph":80,"heading_deg":305,"accuracy_m":9,"recorded_at":"__T+655s__","note":"valid"}
+{"lat":13.0220,"lng":77.5600,"speed_kph":80,"heading_deg":304,"accuracy_m":9,"recorded_at":"__T+715s__","note":"valid"}
+{"lat":13.0280,"lng":77.5520,"speed_kph":78,"heading_deg":304,"accuracy_m":9,"recorded_at":"__T+775s__","note":"valid"}
+{"lat":13.0340,"lng":77.5440,"speed_kph":78,"heading_deg":304,"accuracy_m":9,"recorded_at":"__T+835s__","note":"valid"}
+{"lat":13.0400,"lng":77.5360,"speed_kph":78,"heading_deg":303,"accuracy_m":9,"recorded_at":"__T+745s__","note":"stale — 90s in past"}
+{"lat":13.0460,"lng":77.5280,"speed_kph":78,"heading_deg":303,"accuracy_m":9,"recorded_at":"__T+1015s__","note":"future — 60s ahead"}
+{"lat":13.0520,"lng":77.5200,"speed_kph":78,"heading_deg":303,"accuracy_m":9,"recorded_at":"__T+955s__","note":"valid recovery"}

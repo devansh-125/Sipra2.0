@@ -1,0 +1,9 @@
+{
+  "trip_id": "e3ea8f16-90f0-4d40-a43d-9dcb9f8254f1",
+  "current_lat": 12.9712,
+  "current_lng": 77.5893,
+  "destination_lat": 12.9587,
+  "destination_lng": 77.6442,
+  "golden_hour_deadline": "2030-01-01T12:00:00Z",
+  "avg_speed_kph": 40
+}

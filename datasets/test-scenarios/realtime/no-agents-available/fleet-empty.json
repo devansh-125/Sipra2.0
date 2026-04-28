@@ -1,0 +1,6 @@
+{
+  "snapshot_at_seconds_into_trip": 600,
+  "ambulance_position": { "lat": 13.0500, "lng": 77.5100 },
+  "comment": "2 AM rural NH-48 — no Uber/Swiggy partners within 20 km of corridor. Empty fleet is the correct, non-error state.",
+  "fleet": []
+}

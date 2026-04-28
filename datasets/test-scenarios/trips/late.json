@@ -1,0 +1,27 @@
+{
+  "scenario": "late",
+  "description": "Trip created with golden_hour_deadline already 5 minutes in the past — should immediately transition to DroneHandoff on first risk poll",
+  "cargo_category": "Organ",
+  "cargo_description": "Test: Late-arrival heart — past deadline at dispatch",
+  "origin": {
+    "lat": 12.9587,
+    "lng": 77.6442,
+    "name": "Manipal Hospital HAL, Bangalore"
+  },
+  "destination": {
+    "lat": 13.3379,
+    "lng": 77.1031,
+    "name": "Sri Siddhartha Medical College, Tumkur"
+  },
+  "golden_hour_minutes": -5,
+  "golden_hour_deadline": "__DYNAMIC__",
+  "ambulance_id": "TEST-AMB-LATE-01",
+  "hospital_dispatch_id": "Manipal-HAL-BLR",
+  "expected_outcome": {
+    "will_breach": true,
+    "handoff_expected": true,
+    "handoff_within_seconds": 12,
+    "breach_probability_estimate": 1.0,
+    "reason": "Deadline is in the past. buffer_seconds is large negative regardless of route → sigmoid saturates to 1.0 → handoff fires on first risk poll cycle (default 10s interval)."
+  }
+}

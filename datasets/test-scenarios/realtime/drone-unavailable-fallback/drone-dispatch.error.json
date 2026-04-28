@@ -1,0 +1,12 @@
+{
+  "http_status": 503,
+  "error": "drone_fleet_exhausted",
+  "message": "All 8 drones in BLR-PAD-03 are airborne or charging. Next available: SIPRA-DRONE-K72X at 18:55 IST (eta 12 min from now).",
+  "retry_after_seconds": 720,
+  "fallback_recommendation": "manual_ambulance_coordination",
+  "operator_alert": {
+    "level": "critical",
+    "channel": "ops-pager",
+    "summary": "Drone fleet exhausted at peak demand window. Trip 00000006 escalated to manual."
+  }
+}

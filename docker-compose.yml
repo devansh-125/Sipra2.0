@@ -8,10 +8,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sipra_dev}
       POSTGRES_DB: ${POSTGRES_DB:-sipra}
     ports:
-      - "6000:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ./infra/docker/postgres/seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sipra} -d ${POSTGRES_DB:-sipra}"]
       interval: 5s
@@ -70,6 +71,28 @@ services:
     restart: unless-stopped
     ports:
       - "4003:4003"
+    networks:
+      - sipra-net
+
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    container_name: sipra-valhalla
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      tile_urls: "https://download.geofabrik.de/asia/india/southern-zone-latest.osm.pbf"
+      serve_tiles: "True"
+      build_elevation: "False"
+      build_admins: "False"
+      use_default_speeds_config: "True"
+      force_rebuild: "False"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8002/status >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 40s
     networks:
       - sipra-net
 

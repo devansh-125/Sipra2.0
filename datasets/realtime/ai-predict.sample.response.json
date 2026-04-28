@@ -1,0 +1,10 @@
+{
+  "trip_id": "550e8400-e29b-41d4-a716-446655440000",
+  "predicted_eta_seconds": 1020,
+  "deadline_seconds_remaining": 1800,
+  "breach_probability": 0.18,
+  "will_breach": false,
+  "weather_condition": "light_rain",
+  "weather_factor": 1.15,
+  "reasoning": "Step 1 — Haversine straight-line distance: 8.45 km. Step 2 — Road distance (×1.4 traffic factor): 11.83 km. Step 3 — Weather conditions: light_rain (×1.15 impact factor). Step 4 — At avg speed 45.0 km/h, weather-adjusted to 10.9 m/s → predicted ETA 1020 s (17.0 min). Step 5 — Golden-hour deadline in 1800 s (30.0 min). Step 6 — Buffer 780 s → breach probability 0.180 (logistic sigmoid, scale=300 s). Decision: ON TRACK — continue monitoring."
+}

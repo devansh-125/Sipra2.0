@@ -1,0 +1,26 @@
+{
+  "trip_id": "00000001-0000-4000-8000-000000000001",
+  "cargo_category": "Vaccine",
+  "cargo_description": "Cold-chain vaccine batch — 80 doses, 2°C tolerance, inter-city transfer",
+  "origin": {
+    "lat": 12.9587,
+    "lng": 77.6442,
+    "name": "Manipal Hospital HAL, Bangalore"
+  },
+  "destination": {
+    "lat": 13.3379,
+    "lng": 77.1031,
+    "name": "Sri Siddhartha Medical College, Tumkur"
+  },
+  "golden_hour_minutes": 120,
+  "golden_hour_deadline": "__DYNAMIC__",
+  "ambulance_id": "AMB-NORMAL-01",
+  "hospital_dispatch_id": "Manipal-HAL-BLR",
+  "tolerance_celsius": 2.0,
+  "dispatch_context": {
+    "time_of_day": "mid_morning",
+    "local_time_hint": "10:30 IST",
+    "weather": "clear",
+    "expected_route": "NH-48 (Bangalore-Tumkur Highway)"
+  }
+}

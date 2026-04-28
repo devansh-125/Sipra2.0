@@ -84,6 +84,11 @@ export default function RerouteStatusPanel() {
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {entry.bountyId && (
+                          <span className="text-blue-400 font-mono text-[10px]" title={`Bounty: ${entry.bountyId}`}>
+                            🎯
+                          </span>
+                        )}
                         {entry.amountPoints ? (
                           <span className="text-yellow-400 font-mono text-[10px]">
                             +{entry.amountPoints}

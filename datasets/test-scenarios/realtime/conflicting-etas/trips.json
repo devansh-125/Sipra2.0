@@ -1,0 +1,39 @@
+{
+  "scenario": "conflicting_etas",
+  "description": "Three trips dispatched within ~30 seconds of each other along the same NH-48 corridor with different speeds and weather draws",
+  "trips": [
+    {
+      "trip_id": "00000004-0000-4000-8000-000000000401",
+      "label": "Trip α — vaccine, on track",
+      "cargo_category": "Vaccine",
+      "cargo_description": "Multi-trip α — vaccine batch",
+      "origin": { "lat": 12.9587, "lng": 77.6442, "name": "Manipal HAL" },
+      "destination": { "lat": 13.3379, "lng": 77.1031, "name": "Sri Siddhartha Tumkur" },
+      "golden_hour_minutes": 120,
+      "ambulance_id": "AMB-MULTI-ALPHA",
+      "expected": { "will_breach": false, "breach_probability": 0.0002 }
+    },
+    {
+      "trip_id": "00000004-0000-4000-8000-000000000402",
+      "label": "Trip β — blood, close call",
+      "cargo_category": "Blood",
+      "cargo_description": "Multi-trip β — O-negative units",
+      "origin": { "lat": 12.9587, "lng": 77.6442, "name": "Manipal HAL" },
+      "destination": { "lat": 13.3379, "lng": 77.1031, "name": "Sri Siddhartha Tumkur" },
+      "golden_hour_minutes": 120,
+      "ambulance_id": "AMB-MULTI-BETA",
+      "expected": { "will_breach": false, "breach_probability": 0.249 }
+    },
+    {
+      "trip_id": "00000004-0000-4000-8000-000000000403",
+      "label": "Trip γ — organ, breach",
+      "cargo_category": "Organ",
+      "cargo_description": "Multi-trip γ — kidney",
+      "origin": { "lat": 12.9587, "lng": 77.6442, "name": "Manipal HAL" },
+      "destination": { "lat": 13.3379, "lng": 77.1031, "name": "Sri Siddhartha Tumkur" },
+      "golden_hour_minutes": 120,
+      "ambulance_id": "AMB-MULTI-GAMMA",
+      "expected": { "will_breach": true, "breach_probability": 1.0 }
+    }
+  ]
+}

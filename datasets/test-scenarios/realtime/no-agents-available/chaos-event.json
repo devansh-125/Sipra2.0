@@ -1,0 +1,15 @@
+{
+  "scenario_name": "drain_fleet",
+  "description": "Chaos-panel event: instantly remove all partner vehicles from the fleet broadcast for 5 minutes. Used to test 'No Partners' badge in daytime demos.",
+  "endpoint": "POST /api/v1/chaos/drain-fleet",
+  "request_body": {
+    "duration_seconds": 300,
+    "reason": "demo: simulate rural / late-night corridor"
+  },
+  "expected_response": {
+    "status": "applied",
+    "drains_until": "__DYNAMIC_PLUS_5_MIN__",
+    "fleet_size_before": 20,
+    "fleet_size_after": 0
+  }
+}

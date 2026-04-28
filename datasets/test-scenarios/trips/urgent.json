@@ -1,0 +1,27 @@
+{
+  "scenario": "urgent",
+  "description": "120-min golden hour over the 72 km Bangalore→Tumkur NH-48 corridor with reduced ambulance speed (50 kph) — close-call breach test",
+  "cargo_category": "Blood",
+  "cargo_description": "Test: Urgent O-negative blood units, inter-city",
+  "origin": {
+    "lat": 12.9587,
+    "lng": 77.6442,
+    "name": "Manipal Hospital HAL, Bangalore"
+  },
+  "destination": {
+    "lat": 13.3379,
+    "lng": 77.1031,
+    "name": "Sri Siddhartha Medical College, Tumkur"
+  },
+  "golden_hour_minutes": 120,
+  "golden_hour_deadline": "__DYNAMIC__",
+  "ambulance_id": "TEST-AMB-URGENT-01",
+  "hospital_dispatch_id": "Manipal-HAL-BLR",
+  "expected_outcome": {
+    "will_breach": false,
+    "handoff_expected": false,
+    "buffer_seconds_estimate": 200,
+    "breach_probability_estimate": 0.34,
+    "reason": "72 km × 1.4 = 100.8 km road. At 50 kph clear weather: ETA ≈ 7258 s = 121 min vs 120 min deadline. Buffer is razor-thin (~+200 s after 5 min into trip), breach_prob ~0.34. Sensitive scenario for tuning the handoff threshold — small speed drop tips it over."
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "scenario": "multiple_simultaneous",
+  "description": "5 trips running simultaneously to test system capacity",
+  "trips": [
+    {
+      "cargo_category": "Organ",
+      "cargo_description": "Test: Multi-trip #1 - Kidney",
+      "origin": { "lat": 12.9656, "lng": 77.5713 },
+      "destination": { "lat": 12.9587, "lng": 77.6442 },
+      "golden_hour_minutes": 30,
+      "ambulance_id": "TEST-AMB-MULTI-01"
+    },
+    {
+      "cargo_category": "Blood",
+      "cargo_description": "Test: Multi-trip #2 - Blood",
+      "origin": { "lat": 12.9800, "lng": 77.5900 },
+      "destination": { "lat": 12.9700, "lng": 77.6500 },
+      "golden_hour_minutes": 20,
+      "ambulance_id": "TEST-AMB-MULTI-02"
+    },
+    {
+      "cargo_category": "Vaccine",
+      "cargo_description": "Test: Multi-trip #3 - Vaccine",
+      "origin": { "lat": 12.9500, "lng": 77.6000 },
+      "destination": { "lat": 12.9600, "lng": 77.6300 },
+      "golden_hour_minutes": 45,
+      "ambulance_id": "TEST-AMB-MULTI-03"
+    },
+    {
+      "cargo_category": "Medication",
+      "cargo_description": "Test: Multi-trip #4 - Critical meds",
+      "origin": { "lat": 12.9400, "lng": 77.5800 },
+      "destination": { "lat": 12.9550, "lng": 77.6400 },
+      "golden_hour_minutes": 15,
+      "ambulance_id": "TEST-AMB-MULTI-04"
+    },
+    {
+      "cargo_category": "Organ",
+      "cargo_description": "Test: Multi-trip #5 - Heart (critical)",
+      "origin": { "lat": 12.5129, "lng": 77.6201 },
+      "destination": { "lat": 12.9587, "lng": 77.6442 },
+      "golden_hour_minutes": 3,
+      "ambulance_id": "TEST-AMB-MULTI-05"
+    }
+  ],
+  "expected_outcome": {
+    "total_trips": 5,
+    "expected_breaches": 2,
+    "breach_trip_ids": ["TEST-AMB-MULTI-04", "TEST-AMB-MULTI-05"],
+    "reason": "Trips 4 and 5 have tight deadlines and will trigger handoffs"
+  }
+}
