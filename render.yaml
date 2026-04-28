@@ -29,7 +29,9 @@ services:
     healthCheckPath: /healthz
     envVars:
       - key: GOOGLE_MAPS_API_KEY
-        sync: false
+        sync: false           # same key you use for the web (for Google Routes API fallback)
+      - key: OPENWEATHERMAP_API_KEY
+        sync: false           # optional — omit to use mock weather data
 
   - type: web
     name: sipra-fleet-receiver

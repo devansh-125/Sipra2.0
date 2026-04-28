@@ -160,19 +160,6 @@ func main() {
 		Format: "${time} | ${status} | ${latency} | ${method} ${path}\n",
 	}))
 
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{
-			"service": "sipra-core",
-			"status":  "running",
-			"endpoints": fiber.Map{
-				"health":    "/healthz",
-				"metrics":   "/metrics",
-				"websocket": "/ws/dashboard",
-				"api":       "/api/v1",
-			},
-		})
-	})
-
 	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 
 	app.Get("/healthz", func(c *fiber.Ctx) error {
