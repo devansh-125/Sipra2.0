@@ -16,6 +16,10 @@
  */
 import type { GeoPoint } from './types';
 
+// Default fallback points (Medanta → Tender Palm Hospital, Lucknow)
+export const FALLBACK_ORIGIN: GeoPoint = { lat: 26.8124, lng: 80.9634 };
+export const FALLBACK_DESTINATION: GeoPoint = { lat: 26.8105, lng: 81.0268 };
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------

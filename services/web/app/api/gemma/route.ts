@@ -45,7 +45,7 @@ export interface GemmaReport {
 // ── POST /api/gemma ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY ?? process.env.GEMINI_AI_KEY;
 
     if (!apiKey) {
         // Return a mock report so the UI still works without a key
