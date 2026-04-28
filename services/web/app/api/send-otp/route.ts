@@ -24,16 +24,12 @@ export async function POST(req: Request) {
         const pass = rawPass.replace(/\s+/g, '');
 
         if (!user || !pass) {
-            if (process.env.NODE_ENV !== 'production') {
-                console.warn('[Demo Backend] Missing SMTP credentials. Falling back to dev OTP mode.');
-                return NextResponse.json({
-                    success: true,
-                    message: 'OTP generated in dev mode (email skipped).',
-                    devOtp: otp,
-                });
-            }
-            console.error('[Demo Backend] Missing EMAIL_USER/SMTP_USER or EMAIL_PASS/SMTP_PASS environment variable.');
-            return NextResponse.json({ error: 'Server requires SMTP credentials to send OTP.' }, { status: 500 });
+            console.warn('[Demo] Missing SMTP credentials — returning OTP in response for demo mode.');
+            return NextResponse.json({
+                success: true,
+                message: 'OTP generated (demo mode — no email sent).',
+                devOtp: otp,
+            });
         }
 
         const transporter = nodemailer.createTransport({
