@@ -176,74 +176,76 @@ export function HospitalVerificationPortal() {
         router.push('/demo/corridor-sim');
     };
 
-    const INPUT_STYLE = "w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-slate-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 outline-none disabled:opacity-50 disabled:cursor-not-allowed";
+    const INPUT_STYLE = "w-full bg-slate-950/80 border border-slate-700/80 rounded-lg px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40 outline-none disabled:opacity-50 disabled:cursor-not-allowed";
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-200 flex flex-col p-6 items-center selection:bg-blue-500/30">
-            <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">
+        <div className="relative h-screen overflow-y-auto overflow-x-hidden bg-slate-950 text-slate-200 selection:bg-blue-500/30">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.16),_transparent_42%),radial-gradient(circle_at_85%_15%,_rgba(14,116,144,0.14),_transparent_35%)]" />
+            <div className="relative mx-auto w-full max-w-6xl px-4 py-8 md:px-6 md:py-10">
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:gap-8">
 
                 {/* Left Column: Flow Context */}
-                <div className="md:col-span-1 space-y-4">
-                    <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 shadow-xl">
-                        <h1 className="text-xl font-bold tracking-tight text-white mb-1">Hospital Verification</h1>
-                        <p className="text-xs text-slate-400 mb-6 uppercase tracking-wider">Secure access for verified medical institutions only</p>
+                    <div className="space-y-4 lg:col-span-4 xl:col-span-3 lg:sticky lg:top-6 lg:self-start">
+                        <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-700/70 shadow-[0_20px_45px_-25px_rgba(15,23,42,0.95)] backdrop-blur-sm">
+                            <h1 className="text-2xl font-bold tracking-tight text-white mb-2">Hospital Verification</h1>
+                            <p className="text-[11px] text-slate-400 mb-6 uppercase tracking-[0.14em]">Secure access for verified medical institutions only</p>
 
-                        <div className="space-y-4 text-sm text-slate-300">
-                            <div className={`flex items-start gap-3 transition-opacity ${step >= 1 ? 'opacity-100' : 'opacity-40'}`}>
-                                <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-                                <p>1. Institutional Registration & Identity</p>
+                            <div className="space-y-4 text-[15px] leading-relaxed text-slate-300">
+                                <div className={`flex items-start gap-3 transition-opacity ${step >= 1 ? 'opacity-100' : 'opacity-40'}`}>
+                                    <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+                                    <p>1. Institutional Registration & Identity</p>
+                                </div>
+                                <div className={`flex items-start gap-3 transition-opacity ${step >= 3 ? 'opacity-100' : 'opacity-40'}`}>
+                                    <FileCheck className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                                    <p>2. Medical License Verification Scan</p>
+                                </div>
+                                <div className={`flex items-start gap-3 transition-opacity ${step === 4 ? 'opacity-100' : 'opacity-40'}`}>
+                                    <BrainCircuit className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                                    <p>3. AI Authenticity Scoring</p>
+                                </div>
                             </div>
-                            <div className={`flex items-start gap-3 transition-opacity ${step >= 3 ? 'opacity-100' : 'opacity-40'}`}>
-                                <FileCheck className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-                                <p>2. Medical License Verification Scan</p>
-                            </div>
-                            <div className={`flex items-start gap-3 transition-opacity ${step === 4 ? 'opacity-100' : 'opacity-40'}`}>
-                                <BrainCircuit className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                                <p>3. AI Authenticity Scoring</p>
-                            </div>
+                        </div>
+
+                        <div className={`p-5 rounded-2xl border flex flex-col items-center justify-center transition-colors shadow-[0_20px_45px_-25px_rgba(15,23,42,0.95)] ${getStatusColor()}`}>
+                            <h3 className="text-xs uppercase tracking-[0.14em] opacity-80 mb-1">Status</h3>
+                            <p className="text-2xl font-bold tracking-wide">{status}</p>
+                            {trustScore > 0 && (
+                                <p className="text-xl font-mono mt-2">{trustScore}% Trust</p>
+                            )}
                         </div>
                     </div>
 
-                    <div className={`p-5 rounded-xl border flex flex-col items-center justify-center transition-colors shadow-lg ${getStatusColor()}`}>
-                        <h3 className="text-xs uppercase tracking-widest opacity-80 mb-1">Status</h3>
-                        <p className="text-lg font-bold tracking-wide">{status}</p>
-                        {trustScore > 0 && (
-                            <p className="text-2xl font-mono mt-2">{trustScore}% Trust</p>
-                        )}
-                    </div>
-
                     {errorMsg && (
-                        <div className="p-4 bg-red-900/20 border border-red-500/50 rounded flex items-center gap-2 text-red-400 text-sm animate-in fade-in zoom-in-95">
+                        <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-xl flex items-center gap-2 text-red-400 text-sm animate-in fade-in zoom-in-95 lg:col-span-8 xl:col-span-9">
                             <XCircle className="w-4 h-4 shrink-0" />
                             {errorMsg}
                         </div>
                     )}
-                </div>
 
                 {/* Right Column: Dynamic Steps */}
-                <div className="md:col-span-2 space-y-6">
+                    <div className="space-y-6 lg:col-span-8 xl:col-span-9">
 
                     {/* Step 1 & 2: Form & OTP */}
                     {step <= 3 && (
-                        <div className={`p-6 rounded-xl bg-slate-900 border border-slate-800 shadow-xl transition-all ${step > 2 ? 'opacity-60 pointer-events-none' : ''}`}>
-                            <h2 className="text-lg font-semibold text-white mb-4">1. Entity Registration</h2>
+                        <div className={`p-6 md:p-7 rounded-2xl bg-slate-900/75 border border-slate-700/70 shadow-[0_30px_60px_-35px_rgba(15,23,42,0.95)] transition-all ${step > 2 ? 'opacity-60 pointer-events-none' : ''}`}>
+                            <h2 className="text-3xl font-bold text-white mb-5">1. Entity Registration</h2>
 
-                            <div className="grid grid-cols-2 gap-4 mb-6">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                                 <div>
-                                    <label className="text-xs uppercase text-slate-500 mb-1 block">Hospital Name *</label>
+                                    <label className="text-xs uppercase text-slate-400 mb-1.5 block tracking-[0.12em]">Hospital Name *</label>
                                     <input type="text" className={INPUT_STYLE} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={otpSent} />
                                 </div>
                                 <div>
-                                    <label className="text-xs uppercase text-slate-500 mb-1 block">Registration/License ID *</label>
+                                    <label className="text-xs uppercase text-slate-400 mb-1.5 block tracking-[0.12em]">Registration/License ID *</label>
                                     <input type="text" className={INPUT_STYLE} value={form.license} onChange={(e) => setForm({ ...form, license: e.target.value })} placeholder="GOV-..." disabled={otpSent} />
                                     <p className="text-[10px] text-slate-500 mt-1">Hint: GOV- yields high trust, PVT- yields review</p>
                                 </div>
                                 <div>
-                                    <label className="text-xs uppercase text-slate-500 mb-1 block">Official Email *</label>
+                                    <label className="text-xs uppercase text-slate-400 mb-1.5 block tracking-[0.12em]">Official Email *</label>
                                     <input type="email" className={INPUT_STYLE} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} disabled={otpSent} />
                                 </div>
                                 <div>
-                                    <label className="text-xs uppercase text-slate-500 mb-1 block">Phone Number *</label>
+                                    <label className="text-xs uppercase text-slate-400 mb-1.5 block tracking-[0.12em]">Phone Number *</label>
                                     <input type="text" className={INPUT_STYLE} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} disabled={otpSent} />
                                 </div>
                             </div>
@@ -252,18 +254,18 @@ export function HospitalVerificationPortal() {
                                 <button
                                     onClick={handleSendOTP}
                                     disabled={isProcessing}
-                                    className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-4 py-2 rounded shadow flex items-center justify-center transition-colors"
+                                    className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-5 py-2.5 rounded-lg shadow flex items-center justify-center transition-colors"
                                 >
                                     {isProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <MailCheck className="w-4 h-4 mr-2" />}
                                     Send Security OTP
                                 </button>
                             ) : (
-                                <div className="bg-blue-900/20 border border-blue-500/30 p-4 rounded-lg mt-4 animate-in fade-in slide-in-from-top-2">
+                                <div className="bg-blue-900/20 border border-blue-500/30 p-4 rounded-xl mt-4 animate-in fade-in slide-in-from-top-2">
                                     <p className="text-sm text-blue-300 mb-3 block">✓ OTP sent to official hospital email ({form.email})</p>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-col sm:flex-row gap-2">
                                         <input
                                             type="text"
-                                            className={`${INPUT_STYLE} font-mono tracking-widest w-40 text-center text-lg`}
+                                            className={`${INPUT_STYLE} font-mono tracking-widest w-full sm:w-44 text-center text-lg`}
                                             placeholder="1234"
                                             value={otpCode}
                                             onChange={(e) => setOtpCode(e.target.value)}
@@ -273,7 +275,7 @@ export function HospitalVerificationPortal() {
                                         <button
                                             onClick={handleVerifyOTP}
                                             disabled={isProcessing || otpCode.length < 4 || step > 2}
-                                            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium px-6 py-2 rounded shadow transition-colors"
+                                            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium px-6 py-2.5 rounded-lg shadow transition-colors"
                                         >
                                             {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify Code'}
                                         </button>
@@ -293,15 +295,15 @@ export function HospitalVerificationPortal() {
 
                     {/* Step 3: Document Upload */}
                     {step === 3 && (
-                        <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 shadow-xl animate-in fade-in slide-in-from-right-4">
+                        <div className="p-6 md:p-7 rounded-2xl bg-slate-900/75 border border-slate-700/70 shadow-[0_30px_60px_-35px_rgba(15,23,42,0.95)] animate-in fade-in slide-in-from-right-4">
                             <div className="flex items-center gap-3 mb-4">
                                 <FileCheck className="w-5 h-5 text-indigo-400" />
                                 <h2 className="text-lg font-semibold text-white">2. Medical License Upload</h2>
                             </div>
-                            <p className="text-sm text-slate-400 mb-6">Please upload a valid hospital license or government ID to verify authenticity.</p>
+                            <p className="text-base text-slate-300/90 mb-6">Please upload a valid hospital license or government ID to verify authenticity.</p>
 
                             {!selectedFile ? (
-                                <label className="cursor-pointer border-2 border-dashed border-slate-700 hover:border-indigo-500 hover:bg-indigo-500/5 rounded-lg p-10 flex flex-col items-center justify-center text-center transition-all">
+                                <label className="cursor-pointer border-2 border-dashed border-slate-600 hover:border-indigo-500 hover:bg-indigo-500/5 rounded-2xl p-10 md:p-12 min-h-[260px] flex flex-col items-center justify-center text-center transition-all">
                                     <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileChange} />
                                     <div className="bg-slate-800 p-4 rounded-full mb-4">
                                         <UploadCloud className="w-8 h-8 text-indigo-400" />
@@ -310,7 +312,7 @@ export function HospitalVerificationPortal() {
                                     <p className="text-xs text-slate-500 mt-1">PDF, JPEG, or PNG up to 10MB</p>
                                 </label>
                             ) : (
-                                <div className="border border-slate-700 rounded-lg p-6 flex flex-col items-center text-center animate-in zoom-in-95">
+                                <div className="border border-slate-700 rounded-2xl p-6 flex flex-col items-center text-center animate-in zoom-in-95 bg-slate-950/30">
                                     {previewUrl && (
                                         <div className="w-48 h-32 mb-4 border border-slate-600 rounded bg-black flex items-center justify-center overflow-hidden">
                                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -358,7 +360,7 @@ export function HospitalVerificationPortal() {
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-6">
 
                             {/* Gemma Analysis Card */}
-                            <div className="p-6 rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/40 to-slate-900 shadow-xl relative overflow-hidden">
+                            <div className="p-6 md:p-7 rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/40 to-slate-900 shadow-[0_30px_60px_-35px_rgba(15,23,42,0.95)] relative overflow-hidden">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 opacity-50"></div>
                                 <div className="flex items-center gap-2 mb-6">
                                     <BrainCircuit className="w-5 h-5 text-indigo-400" />
@@ -398,7 +400,7 @@ export function HospitalVerificationPortal() {
                             </div>
 
                             {/* Action Card */}
-                            <div className="p-6 rounded-xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between shadow-xl gap-4">
+                            <div className="p-6 md:p-7 rounded-2xl bg-slate-900/75 border border-slate-700/70 flex flex-col md:flex-row md:items-center justify-between shadow-[0_30px_60px_-35px_rgba(15,23,42,0.95)] gap-4">
                                 <div>
                                     <h3 className="text-lg font-bold text-white mb-1">Verification Complete</h3>
                                     <p className="text-sm text-slate-400">Institutional identity registered for demo operations.</p>
@@ -418,6 +420,7 @@ export function HospitalVerificationPortal() {
                         </div>
                     )}
 
+                    </div>
                 </div>
             </div>
         </div>
