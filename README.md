@@ -199,7 +199,7 @@ sequenceDiagram
     F->>R: drain buffer
     F->>PG: pgx.Batch INSERT
     F->>CE: CalculateRollingCorridor(tripID)
-    CE->>PG: tx { close current; insert v+1 }
+    CE->>PG: tx { close current; insert v#43;1 }
     CE->>WS: BroadcastCorridorUpdate
     CE->>W: BroadcastCorridor (worker pool)
 
