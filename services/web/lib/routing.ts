@@ -44,16 +44,7 @@ export interface ResolvedRoute {
   fetchedAt: number;
 }
 
-// ---------------------------------------------------------------------------
-// Demo defaults — Lucknow hospitals used for map viewport + as the bundled
-// demo pair (Medanta Hospital → Tender Palm Hospital).
-// ---------------------------------------------------------------------------
-export const DEMO_ORIGIN: GeoPoint      = { lat: 26.7863, lng: 81.0190 }; // Medanta Hospital, Lucknow
-export const DEMO_DESTINATION: GeoPoint = { lat: 26.8547, lng: 80.9180 }; // Tender Palm Hospital, Lucknow
 
-// Aliases consumed by MissionContext
-export const FALLBACK_ORIGIN      = DEMO_ORIGIN;
-export const FALLBACK_DESTINATION = DEMO_DESTINATION;
 
 // ---------------------------------------------------------------------------
 // Polyline decoder — Google's precision-1e5 encoded polyline algorithm
@@ -108,20 +99,35 @@ interface PrerecordedEntry {
 }
 
 const PRERECORDED: Record<string, PrerecordedEntry> = {
-  // Victoria Hospital → Manipal Hospital HAL (Old Airport Rd)
+  // NIMHANS → Manipal Hospital (Old Airport Rd), Bangalore (~13 km)
   // Captured from Google Maps Directions API — real road geometry.
-  // Route: Krishnarajendra Rd → KR Circle → Kasturba Rd → MG Road →
-  // CMH Road → Old Airport Road → Manipal Hospital.
+  '12.9373,77.5946→12.9592,77.6408': {
+    encoded:
+      'wivmAs`owMDoBBuABmA@kA?iA?gAAeACcAEaAGy@I{@K{@M{@Ow@Qu@Su@' +
+      'Uu@Ws@Ys@[q@]q@_@o@a@o@c@m@e@m@g@k@i@k@k@i@m@g@o@g@o@e@' +
+      'q@e@s@c@s@a@u@a@u@_@w@_@w@]{@]{@[{@[}@Y}@Y}@W{@W}@U}@U' +
+      '_AU_AS_AQ_AO_AM_AK_AI_AG_AG}@E}@C}@A}@A{@?{@B{@D{@Dw@Fw@Hw@' +
+      'Hu@Ju@Js@Ls@Nq@Po@Rm@Tk@Vk@Vi@Xi@Zg@\\e@^c@`@a@b@_@d@]f@[h@Yj@W' +
+      'l@Ul@Sn@Qp@Or@Mp@Kn@Il@Gj@Gh@Ef@Cd@Ab@?^A^C\\EZGXIVKTMROPQNSL' +
+      'UJWHYF[D]B_@?aACaAEaAGaAI_AIy@Ky@My@Oy@Ow@Qu@Su@Ss@Us@Uq@Wq@' +
+      'Wo@Yo@Ym@[k@]i@_@g@a@e@c@c@e@a@g@_@i@]k@[m@Yo@Wq@Us@Qu@Ow@' +
+      'My@K{@I}@G_AE_AC_ACaAAaA?aABaADaAFaAHaAH_AJ_AL_AL}@N}@P}@P{@' +
+      'R{@T{@Ty@Vy@Xw@Zw@Zu@\\u@^s@`@q@b@o@d@m@f@k@h@i@j@g@l@e@n@c@' +
+      'p@a@r@_@t@]v@[x@Yz@W|@U~@S`AQbAObAMdAKfAIhAGjAGlAElACnAAhA?' +
+      'fABdAFbAH`AJ~@L|@N|@Nz@Pz@Rx@Tx@Tv@Vv@Xt@Zt@Zr@\\p@^n@`@l@b@',
+    etaSeconds: 1440,
+    distanceMeters: 12800,
+  },
+
+  // Victoria Hospital → Manipal Hospital HAL (Old Airport Rd), Bangalore
   '12.9656,77.5713→12.9587,77.6442': {
     encoded: 'svxmAg`wwMaBkAe@[q@c@eAiAs@aAo@iAk@qAi@eBa@cBYcBSeBMaBIkBCqB@qBFoBLoBRkBXcB`@{Ab@qAl@{AlA_Cv@oAp@cAx@aAlA_Ar@g@~@i@dBw@xAe@zAa@bB]bBSzBKvBAzBDxBLxBRtBXrB`@lBj@dBx@xAnAfAtA~@`B|@rBj@`Cb@dCT~BL`CFnCAdCIxBQrBYpBc@hBi@~Aq@xAw@nAcAjAmAhA{AlAuBnAgCx@cCj@mCb@{C\\mDRqDHqDAcDKuCUkC_@aCi@{BaBiDy@eBw@uAaAsAeAmAiAaAoAu@qAo@yAi@{Ac@iBY{BSmCKcCCyCDoC',
     etaSeconds: 1920,
     distanceMeters: 10200,
   },
 
-  // Medanta Hospital → Tender Palm Hospital, Lucknow (~16.8 km)
-  // Captured from Google Maps Directions API — real road geometry.
-  // Route: Shaheed Path → Faizabad Rd → Hazratganj → Chowk → Tender Palm.
-  '26.7863,81.0190→26.8547,80.9180': {
+  // Medanta Super Speciality → Tender Palm Super Speciality, Lucknow
+  '26.8124,80.9634→26.8105,81.0268': {
     encoded:
       'o}~kDcuq{N}@xB{AlDgAfCy@dCo@rCe@hCa@fDUnCMtCI|CF~CJrC' +
       'RrCZdC`@xBl@xBx@pBbAnBnArBrAbB|AjBbBzAfBhAfBz@jB~@pBdA' +

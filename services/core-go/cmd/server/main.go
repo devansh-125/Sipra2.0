@@ -14,6 +14,7 @@ import (
 	"github.com/devansh-125/sipra/services/core-go/internal/corridor"
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
 	"github.com/devansh-125/sipra/services/core-go/internal/risk"
+	"github.com/devansh-125/sipra/services/core-go/internal/sim"
 	pgstore "github.com/devansh-125/sipra/services/core-go/internal/store/postgres"
 	redisstore "github.com/devansh-125/sipra/services/core-go/internal/store/redis"
 	"github.com/devansh-125/sipra/services/core-go/internal/webhooks"
@@ -77,6 +78,8 @@ func main() {
 	tripRepo := pgstore.NewTripRepo(pool)
 	pingRepo := pgstore.NewPingRepo(pool)
 	pingCache := redisstore.NewPingCache(rdb)
+	fleetTickPublisher := redisstore.NewFleetTickPublisher(rdb, cfg.SimTickMaxLen)
+	valhallaClient := sim.NewValhallaClient(cfg.ValhallaURL, 2500*time.Millisecond)
 	corridorEngine := corridor.NewEngine(pool, cfg.CorridorPingWindow, cfg.CorridorBufferM)
 
 	hub := ws.NewHub()
@@ -193,7 +196,17 @@ func main() {
 	pingHandler := rest.NewPingHandler(pingCache, hub)
 	bountyRepo := bounty.NewRepo(pool)
 	bountyHandler := rest.NewBountyHandler(tripRepo, bountyRepo, hub)
-	chaosHandler := rest.NewChaosHandler(hub, pingCache, tripRepo, pingRepo, cfg.ChaosEnabled)
+	chaosHandler := rest.NewChaosHandler(
+		hub,
+		pingCache,
+		tripRepo,
+		pingRepo,
+		valhallaClient,
+		fleetTickPublisher,
+		cfg.SimTickHz,
+		cfg.ChaosEnabled,
+	)
+	simHandler := rest.NewSimHandler(hub)
 
 	v1 := app.Group("/api/v1")
 	v1.Post("/trips", tripHandler.CreateTrip)
@@ -203,6 +216,9 @@ func main() {
 	v1.Post("/trips/:id/bounties", bountyHandler.CreateBounty)
 	v1.Post("/bounties/:id/claim", bountyHandler.ClaimBounty)
 	v1.Post("/bounties/:id/verify", bountyHandler.VerifyBounty)
+
+	sim := v1.Group("/sim")
+	sim.Post("/fleet", simHandler.UpdateFleet)
 
 	chaos := v1.Group("/chaos")
 	chaos.Post("/flood-bridge", chaosHandler.FloodBridge)

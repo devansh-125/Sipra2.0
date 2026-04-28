@@ -1,0 +1,26 @@
+{
+  "snapshot_at_seconds_into_trip": 300,
+  "ambulance_position": { "lat": 13.0000, "lng": 77.5950 },
+  "fleet": [
+    { "id": "fleet-00", "lat": 13.0080, "lng": 77.5840, "evading": true,  "heading_deg": 306, "route_id": "route-nh48-mainline", "reroute_status": "rerouting" },
+    { "id": "fleet-01", "lat": 13.0150, "lng": 77.5720, "evading": false, "heading_deg": 305, "route_id": "route-nh48-mainline" },
+    { "id": "fleet-02", "lat": 13.0220, "lng": 77.5600, "evading": false, "heading_deg": 304, "route_id": "route-nh48-mainline" },
+    { "id": "fleet-03", "lat": 13.0300, "lng": 77.5480, "evading": false, "heading_deg": 304, "route_id": "route-nh48-mainline" },
+    { "id": "fleet-04", "lat": 13.0100, "lng": 77.5855, "evading": false, "heading_deg": 125, "route_id": "route-nh48-service-east" },
+    { "id": "fleet-05", "lat": 13.0170, "lng": 77.5735, "evading": false, "heading_deg": 125, "route_id": "route-nh48-service-east" },
+    { "id": "fleet-06", "lat": 13.0240, "lng": 77.5615, "evading": false, "heading_deg": 125, "route_id": "route-nh48-service-east" },
+    { "id": "fleet-07", "lat": 13.0320, "lng": 77.5495, "evading": false, "heading_deg": 125, "route_id": "route-nh48-service-east" },
+    { "id": "fleet-08", "lat": 13.0060, "lng": 77.5825, "evading": false, "heading_deg": 305, "route_id": "route-nh48-service-west" },
+    { "id": "fleet-09", "lat": 13.0130, "lng": 77.5705, "evading": false, "heading_deg": 305, "route_id": "route-nh48-service-west" },
+    { "id": "fleet-10", "lat": 13.0200, "lng": 77.5585, "evading": false, "heading_deg": 304, "route_id": "route-nh48-service-west" },
+    { "id": "fleet-11", "lat": 13.0280, "lng": 77.5465, "evading": false, "heading_deg": 304, "route_id": "route-nh48-service-west" },
+    { "id": "fleet-12", "lat": 13.0080, "lng": 77.5770, "evading": false, "heading_deg": 90,  "route_id": "route-yeshwantpur-cross" },
+    { "id": "fleet-13", "lat": 13.0080, "lng": 77.5920, "evading": false, "heading_deg": 270, "route_id": "route-yeshwantpur-cross" },
+    { "id": "fleet-14", "lat": 13.0130, "lng": 77.5790, "evading": false, "heading_deg": 90,  "route_id": "route-yeshwantpur-cross" },
+    { "id": "fleet-15", "lat": 13.0130, "lng": 77.5940, "evading": false, "heading_deg": 270, "route_id": "route-yeshwantpur-cross" },
+    { "id": "fleet-16", "lat": 13.0540, "lng": 77.5100, "evading": false, "heading_deg": 303, "route_id": "route-peenya-mainline" },
+    { "id": "fleet-17", "lat": 13.0620, "lng": 77.4970, "evading": false, "heading_deg": 303, "route_id": "route-peenya-mainline" },
+    { "id": "fleet-18", "lat": 13.0700, "lng": 77.4830, "evading": false, "heading_deg": 302, "route_id": "route-peenya-mainline" },
+    { "id": "fleet-19", "lat": 13.0780, "lng": 77.4690, "evading": false, "heading_deg": 302, "route_id": "route-peenya-mainline" }
+  ]
+}

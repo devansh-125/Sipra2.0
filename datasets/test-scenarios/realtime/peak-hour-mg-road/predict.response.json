@@ -1,0 +1,14 @@
+{
+  "trip_id": "00000003-0000-4000-8000-000000000003",
+  "predicted_eta_seconds": 6573,
+  "deadline_seconds_remaining": 6900,
+  "breach_probability": 0.249,
+  "will_breach": false,
+  "weather_condition": "clear",
+  "weather_factor": 1.0,
+  "reasoning": "Step 1 — Haversine straight-line distance: 65.20 km. Step 2 — Road distance (×1.4 traffic factor): 91.28 km. Step 3 — Weather conditions: clear (×1.00 impact factor). Step 4 — At avg speed 50.0 km/h, weather-adjusted to 13.9 m/s → predicted ETA 6573 s (109.5 min). Step 5 — Golden-hour deadline in 6900 s (115.0 min). Step 6 — Buffer 327 s → breach probability 0.249 (logistic sigmoid, scale=300 s). Decision: ON TRACK — continue monitoring.",
+  "ai_confidence": 0.82,
+  "ai_reasoning": "NH-48 evening peak crawl at 50 kph leaves only a 5.5-minute slack against the 2-hour deadline. Any further deterioration (rain, secondary incident) flips this to a breach within one poll cycle. Recommend driver alert and standby drone warm-up.",
+  "risk_factors": ["traffic", "time_pressure"],
+  "recommendations": ["Monitor closely", "Warm up standby drone", "Notify dispatcher of slim buffer"]
+}

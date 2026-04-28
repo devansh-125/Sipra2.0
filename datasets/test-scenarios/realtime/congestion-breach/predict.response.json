@@ -1,0 +1,14 @@
+{
+  "trip_id": "00000002-0000-4000-8000-000000000002",
+  "predicted_eta_seconds": 23916,
+  "deadline_seconds_remaining": 6900,
+  "breach_probability": 1.0,
+  "will_breach": true,
+  "weather_condition": "heavy_rain",
+  "weather_factor": 1.35,
+  "reasoning": "Step 1 — Haversine straight-line distance: 70.20 km. Step 2 — Road distance (×1.4 traffic factor): 98.28 km. Step 3 — Weather conditions: heavy_rain (×1.35 impact factor). Step 4 — At avg speed 20.0 km/h, weather-adjusted to 4.1 m/s → predicted ETA 23916 s (398.6 min). Step 5 — Golden-hour deadline in 6900 s (115.0 min). Step 6 — Buffer -17016 s → breach probability 1.000 (logistic sigmoid, scale=300 s). Decision: WILL BREACH — drone handoff recommended.",
+  "ai_confidence": 0.76,
+  "ai_reasoning": "Speed has degraded from 35 to effectively 0 kph over the last 8 pings (Yeshwantpur freight lorry incident on NH-48). Heavy rain compounds the deficit — even if the lane clears the wet expressway will not let the ambulance recover the 4-hour shortfall against a 2-hour deadline. Drone handoff is the only path to deliver the kidney within tolerance.",
+  "risk_factors": ["traffic", "weather", "time_pressure", "speed_degradation", "incident"],
+  "recommendations": ["Trigger drone handoff", "Alert receiving hospital", "Notify donor coordinator", "Prepare landing pad clearance at Sri Siddhartha"]
+}

@@ -64,16 +64,35 @@ export interface HandoffInitiatedPayload {
   predicted_eta_seconds: number;
 }
 
-export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE' | 'HANDOFF_INITIATED' | 'FLEET_UPDATE' | 'REROUTE_STATUS';
+export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE' | 'HANDOFF_INITIATED' | 'FLEET_UPDATE' | 'FLEET_SPAWN' | 'REROUTE_STATUS' | 'RISK_PREDICTION';
+
+export interface RiskPredictionPayload {
+  trip_id: string;
+  predicted_eta_seconds: number;
+  deadline_seconds_remaining: number;
+  breach_probability: number;
+  will_breach: boolean;
+  weather_condition: string;
+  weather_factor: number;
+  reasoning: string;
+  ai_confidence: number;
+  ai_reasoning: string;
+  risk_factors: string[];
+  recommendations: string[];
+}
 
 export interface FleetUpdatePayload {
   fleet: FleetVehicle[];
 }
 
+export interface FleetSpawnPayload {
+  vehicles: FleetVehicle[];
+}
+
 export interface WSEnvelope {
   type: WSMessageType;
   timestamp: string;
-  payload: GPSUpdatePayload | CorridorUpdatePayload | HandoffInitiatedPayload | FleetUpdatePayload | FleetVehicle[] | RerouteStatusPayload;
+  payload: GPSUpdatePayload | CorridorUpdatePayload | HandoffInitiatedPayload | FleetUpdatePayload | FleetSpawnPayload | FleetVehicle[] | RerouteStatusPayload | RiskPredictionPayload;
 }
 
 export type RerouteState = 'rerouting' | 'completed' | 'failed';
@@ -82,7 +101,10 @@ export interface FleetVehicle {
   id: string;
   lat: number;
   lng: number;
-  evading: boolean;
+  evading?: boolean;
+  status?: string;
+  /** True when the vehicle is in the 3 km warning zone but outside the 2 km exclusion zone. Set client-side. */
+  inWarningZone?: boolean;
   reroute_status?: RerouteState | null;
   /** Compass bearing (0 = north, 90 = east, …). Undefined until first tick. */
   heading_deg?: number;

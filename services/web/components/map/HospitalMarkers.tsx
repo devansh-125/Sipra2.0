@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import { IconLayer, TextLayer } from '@deck.gl/layers';
+import { TextLayer } from '@deck.gl/layers';
+import { ScenegraphLayer } from '@deck.gl/mesh-layers';
 import type { Layer } from '@deck.gl/core';
 import type { GeoPoint } from '../../lib/types';
 
@@ -18,9 +19,8 @@ const HOSPITAL_ICON_URL =
   )}`;
 
 interface HospitalPoint {
-  position:  [number, number];
+  position:  [number, number, number];
   label:     string;
-  /** 'origin' | 'destination' — used for tooltip colour coding */
   role:      'origin' | 'destination';
 }
 
@@ -30,15 +30,8 @@ export interface HospitalLabels {
 }
 
 /**
- * Returns a combined [IconLayer, TextLayer] pair for hospital markers.
- *
- * - Icons: hospital cross pinned at origin and destination
- * - Labels: resolved hospital name (or "Pickup Hospital" / "Destination Hospital")
- *           rendered as white text with a dark shadow beneath the icon
- *
- * @param origin      - Origin GeoPoint (source hospital)
- * @param destination - Destination GeoPoint (target hospital)
- * @param labels      - Resolved human-readable names (from useHospitalNames)
+ * 3D scenegraph models pinned at origin/destination, with a dark-slate label
+ * floating above each model. Replaces the prior 2D IconLayer.
  */
 export function useHospitalLayer(
   origin:      GeoPoint | undefined,
@@ -52,56 +45,46 @@ export function useHospitalLayer(
     if (!origin || !destination) return [];
 
     const data: HospitalPoint[] = [
-      { position: [origin.lng,      origin.lat],      label: labels.originName,      role: 'origin' },
-      { position: [destination.lng, destination.lat], label: labels.destinationName, role: 'destination' },
+      { position: [origin.lng,      origin.lat,      0], label: labels.originName,      role: 'origin' },
+      { position: [destination.lng, destination.lat, 0], label: labels.destinationName, role: 'destination' },
     ];
 
-    // ── Icon layer ───────────────────────────────────────────────────────────
-    const iconLayer = new IconLayer<HospitalPoint>({
-      id: 'hospital-icons',
+    const scenegraphLayer = new ScenegraphLayer<HospitalPoint>({
+      id: 'hospital-scenegraph',
       data,
-      getPosition: d => d.position,
-      getIcon: () => ({
-        url:     HOSPITAL_ICON_URL,
-        width:   48,
-        height:  48,
-        anchorY: 48, // pin at bottom-centre of the icon
-      }),
-      getSize:   48,
-      sizeUnits: 'pixels',
-      pickable:  true,
-      // Tooltip shown on hover
-      onHover: ({ object }: { object?: HospitalPoint }) => {
-        if (typeof document !== 'undefined') {
-          document.body.style.cursor = object ? 'pointer' : 'default';
-        }
-      },
+      scenegraph: HOSPITAL_GLB_URL,
+      getPosition:    d => d.position,
+      // Scale a 1 m unit-cube up to a building-sized footprint at z13.
+      sizeScale:      180,
+      // Upright, +Z up (Google Maps deck.gl overlay uses Mercator + meters).
+      getOrientation: [0, 0, 90],
+      _animations:    { '*': { speed: 1 } },
+      _lighting:      'pbr',
+      pickable:       true,
     });
 
-    // ── Text label layer ─────────────────────────────────────────────────────
-    // Positioned 30 px below the icon anchor so it doesn't overlap the cross.
     const textLayer = new TextLayer<HospitalPoint>({
       id: 'hospital-labels',
       data,
-      getPosition:     d => d.position,
-      getText:         d => d.label,
-      getSize:         13,
-      sizeUnits:       'pixels',
-      getColor:        [255, 255, 255, 240],
-      getBackgroundColor: [0, 0, 0, 180],
-      background:      true,
-      backgroundPadding: [6, 3, 6, 3],
-      getBorderColor:  [220, 0, 0, 180],
-      getBorderWidth:  1,
-      getTextAnchor:   'middle',
-      getAlignmentBaseline: 'top',
-      // Shift the label 52 px below the icon (in screen space)
-      getPixelOffset:  [0, 52],
-      fontFamily:      '"Inter", "system-ui", sans-serif',
-      fontWeight:      '600',
-      pickable:        false,
+      getPosition:          d => d.position,
+      getText:              d => d.label,
+      getSize:              13,
+      sizeUnits:            'pixels',
+      getColor:             [255, 255, 255, 255],
+      background:           true,
+      getBackgroundColor:   [20, 25, 35, 230],
+      backgroundPadding:    [8, 4, 8, 4],
+      getBorderColor:       [96, 165, 250, 200],
+      getBorderWidth:       1,
+      getTextAnchor:        'middle',
+      getAlignmentBaseline: 'bottom',
+      // Lift the label above the 3D model in screen space.
+      getPixelOffset:       [0, -90],
+      fontFamily:           '"Inter", "system-ui", sans-serif',
+      fontWeight:           '600',
+      pickable:             false,
     });
 
-    return [iconLayer, textLayer];
+    return [scenegraphLayer, textLayer];
   }, [origin, destination, labels.originName, labels.destinationName]);
 }

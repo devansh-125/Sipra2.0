@@ -1,0 +1,14 @@
+{
+  "trip_id": "00000006-0000-4000-8000-000000000006",
+  "predicted_eta_seconds": 23916,
+  "deadline_seconds_remaining": 6900,
+  "breach_probability": 1.0,
+  "will_breach": true,
+  "weather_condition": "heavy_rain",
+  "weather_factor": 1.35,
+  "reasoning": "Step 6 — Buffer -17016 s → breach probability 1.000. Decision: WILL BREACH — drone handoff recommended.",
+  "ai_confidence": 0.76,
+  "ai_reasoning": "Identical breach math to scenario B. Drone path is the only viable delivery — escalate to manual dispatch if drone fleet unavailable.",
+  "risk_factors": ["traffic", "weather", "time_pressure", "speed_degradation"],
+  "recommendations": ["Trigger drone handoff", "Alert receiving hospital", "Escalate to manual dispatcher if drone unavailable"]
+}

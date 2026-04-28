@@ -121,6 +121,22 @@ func (m *Monitor) evaluateTrip(ctx context.Context, trip domain.Trip) {
 		Str("reasoning", resp.Reasoning).
 		Msg("risk: prediction received")
 
+	// Broadcast every prediction so the dashboard AI Brain panel stays live.
+	m.hub.BroadcastRiskPrediction(ws.RiskPredictionPayload{
+		TripID:                   string(trip.ID),
+		PredictedETASeconds:      resp.PredictedETASeconds,
+		DeadlineSecondsRemaining: resp.DeadlineSecondsRemaining,
+		BreachProbability:        resp.BreachProbability,
+		WillBreach:               resp.WillBreach,
+		WeatherCondition:         resp.WeatherCondition,
+		WeatherFactor:            resp.WeatherFactor,
+		Reasoning:                resp.Reasoning,
+		AIConfidence:             resp.AIConfidence,
+		AIReasoning:              resp.AIReasoning,
+		RiskFactors:              resp.RiskFactors,
+		Recommendations:          resp.Recommendations,
+	})
+
 	if !resp.WillBreach {
 		return
 	}

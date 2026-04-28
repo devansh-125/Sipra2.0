@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Smartphone } from 'lucide-react';
+import Link from 'next/link';
+import { Smartphone, Zap } from 'lucide-react';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
 import type { ConnectionStatus } from '../../hooks/useSipraWebSocket';
 
@@ -43,6 +44,17 @@ export default function StatusBar({ povOpen, onTogglePov }: StatusBarProps) {
       </span>
 
       <div className="flex items-center gap-4">
+        {process.env.NEXT_PUBLIC_CHAOS_ENABLED === 'true' && (
+          <Link
+            href="/admin/chaos"
+            target="_blank"
+            className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-wide text-muted-foreground hover:text-yellow-400 transition-colors"
+          >
+            <Zap className="w-3 h-3" />
+            <span>Chaos</span>
+          </Link>
+        )}
+
         <button
           type="button"
           onClick={onTogglePov}

@@ -51,7 +51,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const res = await fetch(url.toString(), { next: { revalidate: 0 } });
+    const res = await fetch(url.toString(), {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(9000),
+    });
     if (!res.ok) {
       return NextResponse.json(
         { error: `Directions API HTTP ${res.status}` },
@@ -73,7 +76,7 @@ export async function GET(request: NextRequest) {
     };
 
     if (data.status !== 'OK' || !data.routes?.length) {
-      console.error('[directions-proxy] API status:', data.status, data.error_message);
+      console.error('[directions-proxy] Google status:', data.status, '|', data.error_message ?? '(no message)');
       return NextResponse.json(
         { error: data.error_message ?? `Directions API status: ${data.status}` },
         { status: 502 },
@@ -111,7 +114,13 @@ export async function GET(request: NextRequest) {
       },
     );
   } catch (err) {
-    console.error('[directions-proxy] fetch error:', err);
-    return NextResponse.json({ error: 'upstream fetch failed' }, { status: 502 });
+    const isTimeout =
+      (err instanceof Error && err.name === 'TimeoutError') ||
+      (err instanceof Error && (err as NodeJS.ErrnoException).code === 'UND_ERR_CONNECT_TIMEOUT');
+    console.error('[directions-proxy] fetch error:', isTimeout ? 'connect timeout' : err);
+    return NextResponse.json(
+      { error: isTimeout ? 'directions API timed out — check network' : 'upstream fetch failed' },
+      { status: isTimeout ? 504 : 502 },
+    );
   }
 }

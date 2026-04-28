@@ -141,6 +141,8 @@ export interface ChaosFloodBridgeResponse {
 export interface ChaosSpawnFleetResponse {
   spawned: number;
   vehicle_ids: string[];
+  evacuation_run?: boolean;
+  run_duration_sec?: number;
 }
 
 export interface ChaosForceHandoffResponse {
@@ -166,6 +168,7 @@ export function chaosFloodBridge(body: {
 }
 
 export function chaosSpawnFleet(body: {
+  trip_id?: string;
   count: number;
   center_lat: number;
   center_lng: number;

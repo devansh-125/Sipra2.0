@@ -1,0 +1,26 @@
+{
+  "snapshot_at_seconds_into_trip": 300,
+  "ambulance_position": { "lat": 12.9700, "lng": 77.6252 },
+  "fleet": [
+    { "id": "fleet-00", "lat": 12.9738, "lng": 77.6273, "evading": true,  "heading_deg": 130, "route_id": "route-nh48-service-east", "reroute_status": "completed" },
+    { "id": "fleet-01", "lat": 12.9668, "lng": 77.6373, "evading": true,  "heading_deg": 308, "route_id": "route-nh48-service-east", "reroute_status": "rerouting" },
+    { "id": "fleet-02", "lat": 12.9605, "lng": 77.6455, "evading": true,  "heading_deg": 308, "route_id": "route-nh48-service-east", "reroute_status": "rerouting" },
+    { "id": "fleet-03", "lat": 12.9828, "lng": 77.6173, "evading": false, "heading_deg": 130, "route_id": "route-nh48-service-east" },
+    { "id": "fleet-04", "lat": 12.9650, "lng": 77.6360, "evading": true,  "heading_deg": 308, "route_id": "route-nh48-mainline", "reroute_status": "completed" },
+    { "id": "fleet-05", "lat": 12.9720, "lng": 77.6260, "evading": true,  "heading_deg": 128, "route_id": "route-nh48-mainline", "reroute_status": "rerouting" },
+    { "id": "fleet-06", "lat": 12.9600, "lng": 77.6430, "evading": true,  "heading_deg": 308, "route_id": "route-nh48-mainline", "reroute_status": "rerouting" },
+    { "id": "fleet-07", "lat": 12.9900, "lng": 77.6060, "evading": false, "heading_deg": 128, "route_id": "route-nh48-mainline" },
+    { "id": "fleet-08", "lat": 12.9700, "lng": 77.6190, "evading": true,  "heading_deg": 90,  "route_id": "route-yeshwantpur-cross", "reroute_status": "completed" },
+    { "id": "fleet-09", "lat": 12.9700, "lng": 77.6320, "evading": true,  "heading_deg": 270, "route_id": "route-yeshwantpur-cross", "reroute_status": "rerouting" },
+    { "id": "fleet-10", "lat": 12.9460, "lng": 77.6580, "evading": false, "heading_deg": 315, "route_id": "route-old-airport" },
+    { "id": "fleet-11", "lat": 12.9420, "lng": 77.6620, "evading": false, "heading_deg": 135, "route_id": "route-old-airport" },
+    { "id": "fleet-12", "lat": 12.9380, "lng": 77.6660, "evading": false, "heading_deg": 315, "route_id": "route-old-airport" },
+    { "id": "fleet-13", "lat": 12.9340, "lng": 77.6700, "evading": false, "heading_deg": 135, "route_id": "route-old-airport" },
+    { "id": "fleet-14", "lat": 13.0540, "lng": 77.5100, "evading": false, "heading_deg": 304, "route_id": "route-peenya-mainline" },
+    { "id": "fleet-15", "lat": 13.0620, "lng": 77.4970, "evading": false, "heading_deg": 304, "route_id": "route-peenya-mainline" },
+    { "id": "fleet-16", "lat": 13.0700, "lng": 77.4830, "evading": false, "heading_deg": 304, "route_id": "route-peenya-mainline" },
+    { "id": "fleet-17", "lat": 13.0780, "lng": 77.4690, "evading": false, "heading_deg": 304, "route_id": "route-peenya-mainline" },
+    { "id": "fleet-18", "lat": 13.1120, "lng": 77.4100, "evading": false, "heading_deg": 300, "route_id": "route-nelamangala-bypass" },
+    { "id": "fleet-19", "lat": 13.1220, "lng": 77.3950, "evading": false, "heading_deg": 300, "route_id": "route-nelamangala-bypass" }
+  ]
+}

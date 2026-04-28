@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useContext } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
 import { ScatterplotLayer } from '@deck.gl/layers';
@@ -8,7 +8,6 @@ import type { Layer } from '@deck.gl/core';
 
 import { useExclusionLayer } from '../map/ExclusionPolygon';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
-import { useSimulatedDriverPosition } from '../../hooks/useSimulatedDriverPosition';
 import { useDriverProximity } from '../../hooks/useDriverProximity';
 import { useExitPathLayer, exitDirectionLabel, ExitRouteCard } from './ExitRouteCard';
 import { useBountyLifecycle } from '../../hooks/useBountyLifecycle';
@@ -34,6 +33,43 @@ function useSafeMissionPolyline(): import('../../lib/types').GeoPoint[] {
 
 const INDIRANAGAR = { lat: 12.9783, lng: 77.6408 };
 const ORBIT_RADIUS_M = 800;
+
+// Crawls a simulated driver along the polyline at ~30 km/h.
+function useCrawlPosition(
+  center: { lat: number; lng: number },
+  polyline: import('../../lib/types').GeoPoint[] | undefined,
+  seed: number,
+): { lat: number; lng: number } {
+  const startRef = useRef(Date.now());
+  const [pos, setPos] = useState(center);
+
+  const crawl = useCallback(() => {
+    if (!polyline || polyline.length < 2) { setPos(center); return undefined; }
+    const seedFrac = (seed % 100) / 100;
+    const approxRouteM = (polyline.length - 1) * 40;
+    const speedFrac = approxRouteM > 0 ? (30_000 / 3600) / approxRouteM : 0.0001;
+    const tick = () => {
+      const elapsedS = (Date.now() - startRef.current) / 1_000;
+      const progress = (seedFrac + elapsedS * speedFrac) % 1;
+      const n = polyline.length - 1;
+      const segF = progress * n;
+      const segIdx = Math.min(Math.floor(segF), n - 1);
+      const a = polyline[segIdx];
+      const b = polyline[segIdx + 1];
+      const t = segF - segIdx;
+      setPos({ lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t });
+    };
+    tick();
+    return setInterval(tick, 1_000);
+  }, [center, polyline, seed]);
+
+  useEffect(() => {
+    const id = crawl();
+    return () => { if (id !== undefined) clearInterval(id); };
+  }, [crawl]);
+
+  return pos;
+}
 
 // ---------------------------------------------------------------------------
 // MapInner — lives inside <Map> context; manages the DeckGL overlay and pans
@@ -244,7 +280,7 @@ export default function DriverShell({ tripId }: { tripId: string }) {
 
   const { corridorGeoJSON, status } = useSipraWebSocket(wsUrl);
   const missionPolyline = useSafeMissionPolyline();
-  const driverPosition = useSimulatedDriverPosition(INDIRANAGAR, ORBIT_RADIUS_M, 1000, missionPolyline.length >= 2 ? missionPolyline : undefined, 71);
+  const driverPosition = useCrawlPosition(INDIRANAGAR, missionPolyline.length >= 2 ? missionPolyline : undefined, 71);
 
   // Road-aligned corridor from MissionContext (same shape used in Mission Control).
   const missionCorridor = useSafeMissionCorridor();

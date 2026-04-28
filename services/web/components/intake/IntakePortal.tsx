@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ShieldCheck, Loader2, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { createTrip } from '@/lib/api';
+import { createTrip, startTrip } from '@/lib/api';
 import { HOSPITALS } from './hospitals';
 import { TrustLedger } from '../../lib/trustLedger';
 
@@ -167,6 +167,7 @@ export default function IntakePortal() {
           <Button
             type="button"
             onClick={handleDemoLaunch}
+            disabled={submitting}
             className="w-full bg-transparent border border-blue-500/50 hover:border-blue-400 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300 shadow-[0_0_20px_-8px_rgba(59,130,246,0.5)] hover:shadow-[0_0_25px_-5px_rgba(59,130,246,0.6)] uppercase tracking-[0.2em] font-semibold py-6 transition-all duration-200"
           >
             <Zap className="w-4 h-4 mr-2" />

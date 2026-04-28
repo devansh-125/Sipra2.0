@@ -1,0 +1,14 @@
+{
+  "trip_id": "00000001-0000-4000-8000-000000000001",
+  "predicted_eta_seconds": 4382,
+  "deadline_seconds_remaining": 6900,
+  "breach_probability": 0.0002,
+  "will_breach": false,
+  "weather_condition": "clear",
+  "weather_factor": 1.0,
+  "reasoning": "Step 1 — Haversine straight-line distance: 65.20 km. Step 2 — Road distance (×1.4 traffic factor): 91.28 km. Step 3 — Weather conditions: clear (×1.00 impact factor). Step 4 — At avg speed 75.0 km/h, weather-adjusted to 20.8 m/s → predicted ETA 4382 s (73.0 min). Step 5 — Golden-hour deadline in 6900 s (115.0 min). Step 6 — Buffer 2518 s → breach probability 0.000 (logistic sigmoid, scale=300 s). Decision: ON TRACK — continue monitoring.",
+  "ai_confidence": 0.93,
+  "ai_reasoning": "Highway cruise on NH-48 with clear weather and steady traffic. 42-minute slack against the 2-hour deadline gives ample margin even if conditions deteriorate near Dabaspete or Nelamangala bypass.",
+  "risk_factors": ["distance"],
+  "recommendations": ["Continue current route", "Monitor closely"]
+}

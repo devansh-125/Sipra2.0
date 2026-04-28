@@ -1,0 +1,26 @@
+{
+  "scenario": "critical",
+  "description": "Critical delivery 50km away with only 2-minute golden hour - WILL breach",
+  "cargo_category": "Blood",
+  "cargo_description": "Test: Critical blood delivery - guaranteed breach",
+  "origin": {
+    "lat": 12.5129,
+    "lng": 77.6201,
+    "name": "50km South of Bangalore"
+  },
+  "destination": {
+    "lat": 12.9587,
+    "lng": 77.6442,
+    "name": "Manipal Hospital HAL"
+  },
+  "golden_hour_minutes": 2,
+  "golden_hour_deadline": "__DYNAMIC__",
+  "ambulance_id": "TEST-AMB-CRITICAL-01",
+  "hospital_dispatch_id": "Remote-Dispatch-BLR",
+  "expected_outcome": {
+    "will_breach": true,
+    "handoff_expected": true,
+    "handoff_within_seconds": 30,
+    "reason": "50km distance impossible in 2 minutes - AI will predict breach immediately"
+  }
+}

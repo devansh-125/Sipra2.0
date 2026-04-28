@@ -19,8 +19,10 @@ const (
 	MsgGPSUpdate        MessageType = "GPS_UPDATE"
 	MsgCorridorUpdate   MessageType = "CORRIDOR_UPDATE"
 	MsgHandoffInitiated MessageType = "HANDOFF_INITIATED"
+	MsgFleetUpdate      MessageType = "FLEET_UPDATE"
 	MsgFleetSpawn       MessageType = "FLEET_SPAWN"
 	MsgRerouteStatus    MessageType = "REROUTE_STATUS"
+	MsgRiskPrediction   MessageType = "RISK_PREDICTION"
 )
 
 // Envelope is the discriminated-union wrapper for all outbound WebSocket messages.
@@ -62,10 +64,14 @@ type CorridorUpdatePayload struct {
 
 // FleetVehicle is a single synthetic fleet vehicle broadcast by the chaos spawn-fleet endpoint.
 type FleetVehicle struct {
-	ID     string  `json:"id"`
-	Lat    float64 `json:"lat"`
-	Lng    float64 `json:"lng"`
-	Status string  `json:"status"`
+	ID            string   `json:"id"`
+	Lat           float64  `json:"lat"`
+	Lng           float64  `json:"lng"`
+	Status        string   `json:"status"`
+	Evading       bool     `json:"evading"`
+	RerouteStatus string   `json:"reroute_status,omitempty"`
+	HeadingDeg    *float64 `json:"heading_deg,omitempty"`
+	RouteID       string   `json:"route_id,omitempty"`
 }
 
 // FleetSpawnPayload carries a batch of synthetic fleet vehicles to the dashboard.
@@ -226,6 +232,20 @@ func (h *Hub) BroadcastHandoffInitiatedFull(tripID, droneID string, etaSeconds i
 	})
 }
 
+// BroadcastFleetUpdate fans a FLEET_UPDATE envelope to every connected dashboard client.
+// Used by the simulator's per-tick fleet position POST (/api/v1/sim/fleet).
+// The raw JSON body is passed through without re-parsing to avoid struct mismatch.
+func (h *Hub) BroadcastFleetUpdate(vehiclesRaw json.RawMessage) {
+	type payload struct {
+		Fleet json.RawMessage `json:"fleet"`
+	}
+	h.broadcast(Envelope{
+		Type:      MsgFleetUpdate,
+		Timestamp: time.Now().UTC(),
+		Payload:   payload{Fleet: vehiclesRaw},
+	})
+}
+
 // BroadcastFleetSpawn fans a FLEET_SPAWN envelope to every connected dashboard client.
 // Used exclusively by the chaos spawn-fleet endpoint.
 func (h *Hub) BroadcastFleetSpawn(vehicles []FleetVehicle) {
@@ -249,6 +269,32 @@ func (h *Hub) BroadcastRerouteStatus(driverRef, tripID, status, bountyID string,
 			BountyID:     bountyID,
 			AmountPoints: amountPoints,
 		},
+	})
+}
+
+// RiskPredictionPayload carries the AI brain's per-trip risk assessment to the dashboard.
+type RiskPredictionPayload struct {
+	TripID                   string   `json:"trip_id"`
+	PredictedETASeconds      int      `json:"predicted_eta_seconds"`
+	DeadlineSecondsRemaining int      `json:"deadline_seconds_remaining"`
+	BreachProbability        float64  `json:"breach_probability"`
+	WillBreach               bool     `json:"will_breach"`
+	WeatherCondition         string   `json:"weather_condition"`
+	WeatherFactor            float64  `json:"weather_factor"`
+	Reasoning                string   `json:"reasoning"`
+	AIConfidence             float64  `json:"ai_confidence"`
+	AIReasoning              string   `json:"ai_reasoning"`
+	RiskFactors              []string `json:"risk_factors"`
+	Recommendations          []string `json:"recommendations"`
+}
+
+// BroadcastRiskPrediction fans a RISK_PREDICTION envelope to every connected client.
+// Called by the risk monitor on every poll cycle so the dashboard stays current.
+func (h *Hub) BroadcastRiskPrediction(p RiskPredictionPayload) {
+	h.broadcast(Envelope{
+		Type:      MsgRiskPrediction,
+		Timestamp: time.Now().UTC(),
+		Payload:   p,
 	})
 }
 

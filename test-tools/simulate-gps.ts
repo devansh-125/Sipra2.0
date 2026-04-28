@@ -11,7 +11,7 @@
  * 5. Serves live fleet state over WebSocket on port 4001 (consumed by Next.js).
  */
 
-import WebSocket, { WebSocketServer } from 'ws';
+import WebSocket from 'ws';
 import type { Polygon, MultiPolygon } from 'geojson';
 
 // ---------------------------------------------------------------------------
@@ -403,6 +403,112 @@ interface InternalVehicle {
   segIdx: number;            // current segment start index
   segFrac: number;           // [0..1] fraction within that segment
   direction: 1 | -1;        // 1 = origin→dest, -1 = dest→origin
+  indexInRoute: number;      // 0-based index among vehicles on the same route
+
+  // Bounty tracking — prevent duplicate offers per corridor entry
+  bountyOffered: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Bounty helpers
+// ---------------------------------------------------------------------------
+
+/** Approximate corridor backbone length in metres (bounding-box diagonal). */
+function corridorLengthM(geom: CorridorGeometry): number {
+  const coords: [number, number][] =
+    geom.type === 'Polygon'
+      ? (geom.coordinates[0] as [number, number][])
+      : (geom.coordinates[0][0] as [number, number][]);
+  if (coords.length < 2) return 2_000;
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  for (const [lng, lat] of coords) {
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+  }
+  const mLat = (maxLat - minLat) * M_PER_DEG_LAT;
+  const mLng = (maxLng - minLng) * M_PER_DEG_LAT * Math.cos(((minLat + maxLat) / 2) * Math.PI / 180);
+  return Math.sqrt(mLat * mLat + mLng * mLng);
+}
+
+/**
+ * Fire-and-forget bounty lifecycle for a vehicle that just entered the corridor.
+ * 1. POST /trips/:tripId/bounties  → get bounty_id
+ * 2. After 8 s: POST /bounties/:id/claim
+ * 3. After another 5 s: POST /bounties/:id/verify (with vehicle's current position)
+ */
+async function triggerBountyLifecycle(
+  tripId: string,
+  vehicle: InternalVehicle,
+  geom: CorridorGeometry,
+): Promise<void> {
+  const checkpointLat = vehicle.lat;
+  const checkpointLng = vehicle.lng;
+  const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString(); // 5 min window
+
+  let bountyId: string;
+  try {
+    const res = await fetch(`${BACKEND_HTTP}/api/v1/trips/${tripId}/bounties`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        driver_ref:          vehicle.id,
+        base_amount_points:  150,
+        corridor_length_m:   corridorLengthM(geom),
+        deviation_m:         300,
+        checkpoint_lat:      checkpointLat,
+        checkpoint_lng:      checkpointLng,
+        checkpoint_radius_m: 80,
+        expires_at:          expiresAt,
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`⚠️  Bounty create failed for ${vehicle.id}: ${res.status}`);
+      return;
+    }
+    const data = await res.json() as { id: string };
+    bountyId = data.id;
+    console.log(`💰  Bounty offered → ${vehicle.id}  id=${bountyId.slice(0, 8)}…`);
+  } catch (err) {
+    console.warn(`⚠️  Bounty create error for ${vehicle.id}:`, (err as Error).message);
+    return;
+  }
+
+  // Claim after 8 s
+  await new Promise(r => setTimeout(r, 8_000));
+  try {
+    const res = await fetch(`${BACKEND_HTTP}/api/v1/bounties/${bountyId}/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (res.ok) {
+      console.log(`✅  Bounty claimed  → ${vehicle.id}  id=${bountyId.slice(0, 8)}…`);
+    } else {
+      console.warn(`⚠️  Bounty claim failed for ${vehicle.id}: ${res.status}`);
+      return;
+    }
+  } catch (err) {
+    console.warn(`⚠️  Bounty claim error for ${vehicle.id}:`, (err as Error).message);
+    return;
+  }
+
+  // Verify after another 5 s — use vehicle's current position
+  await new Promise(r => setTimeout(r, 5_000));
+  try {
+    const res = await fetch(`${BACKEND_HTTP}/api/v1/bounties/${bountyId}/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ping_lat: vehicle.lat, ping_lng: vehicle.lng }),
+    });
+    if (res.ok) {
+      console.log(`🏆  Bounty verified → ${vehicle.id}  id=${bountyId.slice(0, 8)}…`);
+    } else {
+      console.warn(`⚠️  Bounty verify failed for ${vehicle.id}: ${res.status}`);
+    }
+  } catch (err) {
+    console.warn(`⚠️  Bounty verify error for ${vehicle.id}:`, (err as Error).message);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -433,9 +539,11 @@ function spawnFleetOnRoads(routePolylines: Map<string, GeoCoord[]>): InternalVeh
       const vehicleIdx = ri * vehiclesPerRoute + vi;
       const id = `fleet-${vehicleIdx.toString().padStart(2, '0')}`;
 
-      // Stagger vehicles evenly along the route
-      const fraction = vi / vehiclesPerRoute;
-      let distM = fraction * totalM;
+      // Stagger vehicles evenly along the route with a small per-vehicle jitter
+      // so same-road vehicles don't converge to the same point over time.
+      const jitter = (Math.random() - 0.5) * 0.08; // ±4% of route length
+      const fraction = vi / vehiclesPerRoute + jitter;
+      let distM = Math.max(0, Math.min(totalM * 0.95, fraction * totalM));
 
       // Walk to starting position
       let segIdx = 0;
@@ -472,6 +580,8 @@ function spawnFleetOnRoads(routePolylines: Map<string, GeoCoord[]>): InternalVeh
         segIdx,
         segFrac,
         direction,
+        indexInRoute: vi,
+        bountyOffered: false,
       });
 
       console.log(`  🚗  ${id} → ${route.label} [${startLat.toFixed(5)}, ${startLng.toFixed(5)}]`);
@@ -540,18 +650,17 @@ async function main(): Promise<void> {
   const { trip_id: tripId } = await tripRes.json() as { trip_id: string };
   console.log(`✅  Trip ID: ${tripId}`);
 
-  // 2. Start fleet WebSocket server
-  const wss = new WebSocketServer({ port: FLEET_PORT });
-  console.log(`🌐  Fleet WS server listening on ws://localhost:${FLEET_PORT}`);
-
+  // 2. Fleet update function — POSTs through the backend WS hub (no separate :4001 server)
   function broadcastFleet(vehicles: InternalVehicle[]): void {
-    const msg = JSON.stringify(vehicles.map(toBroadcast));
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) client.send(msg);
-    }
+    fetch(`${BACKEND_HTTP}/api/v1/sim/fleet`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(vehicles.map(toBroadcast)),
+    }).catch(() => { /* non-critical — dashboard just shows stale data for one tick */ });
   }
 
   // 3. Spawn fleet on real roads
+  const vehiclesPerRoute = Math.floor(FLEET_SIZE / FLEET_ROUTES.length);
   console.log(`🚗  Spawning ${FLEET_SIZE} vehicles across ${FLEET_ROUTES.length} roads…`);
   const fleet = spawnFleetOnRoads(routePolylines);
 
@@ -618,13 +727,31 @@ async function main(): Promise<void> {
           const altId    = car.assignedRoute.altRouteId;
           const altRoute = FLEET_ROUTES.find(r => r.id === altId);
           if (altRoute) {
-            const altPts = routePolylines.get(altId) ?? altRoute.fallback;
+            const altPts  = routePolylines.get(altId) ?? altRoute.fallback;
+            const altTotalM = polylineM(altPts);
+            // Spread rerouted vehicles evenly along the alt route by their intra-route
+            // index so they don't all pile up at segIdx=0 / segFrac=0.
+            const staggerFrac = (car.indexInRoute / vehiclesPerRoute) * 0.8; // max 80% along
+            let staggerDistM  = staggerFrac * altTotalM;
+            let altSegIdx = 0, altSegFrac = 0;
+            for (let si = 0; si < altPts.length - 1; si++) {
+              const slen = segmentM(altPts[si].lat, altPts[si].lng, altPts[si + 1].lat, altPts[si + 1].lng);
+              if (staggerDistM <= slen) { altSegIdx = si; altSegFrac = slen > 0 ? staggerDistM / slen : 0; break; }
+              staggerDistM -= slen;
+              altSegIdx = si;
+            }
             car.activePts     = altPts;
             car.assignedRoute = altRoute;
             car.route_id      = altId;
-            car.segIdx        = 0;
-            car.segFrac       = 0;
-            console.log(`  ↪  ${car.id} rerouting to ${altRoute.label}`);
+            car.segIdx        = altSegIdx;
+            car.segFrac       = altSegFrac;
+            console.log(`  ↪  ${car.id} rerouting to ${altRoute.label} (stagger ${(staggerFrac * 100).toFixed(0)}%)`);
+          }
+
+          // Offer a bounty the first time this vehicle enters the corridor
+          if (!car.bountyOffered && corridorGeom) {
+            car.bountyOffered = true;
+            triggerBountyLifecycle(tripId, car, corridorGeom).catch(() => { /* silent */ });
           }
         }
         car.evading = true;
@@ -637,6 +764,7 @@ async function main(): Promise<void> {
           // Simply let the current route continue — actual restoration happens
           // when the vehicle completes the alternate route
           car.evading = false;
+          car.bountyOffered = false; // reset so next corridor entry can offer again
         }
       }
 
@@ -680,7 +808,6 @@ async function main(): Promise<void> {
     console.log('\n🛑  Simulator stopped');
     clearInterval(interval);
     backendWs.close();
-    wss.close();
     process.exit(0);
   });
 

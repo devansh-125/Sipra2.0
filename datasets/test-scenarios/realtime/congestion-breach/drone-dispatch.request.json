@@ -1,0 +1,13 @@
+{
+  "trip_id": "00000002-0000-4000-8000-000000000002",
+  "pickup": {
+    "lat": 12.9700,
+    "lng": 77.6252
+  },
+  "dropoff": {
+    "lat": 13.3379,
+    "lng": 77.1031
+  },
+  "cargo_type": "Organ",
+  "priority": "CRITICAL"
+}
