@@ -59,13 +59,54 @@ Sipra fixes that loop in software.
 
 ## 💡 The Solution
 
-Sipra is an **event-driven orchestrator** that does three things continuously and autonomously:
+Sipra is an **event-driven AI orchestrator** built on three core pillars that operate concurrently and autonomously — no human dispatcher required.
 
-1. **Broadcasts a rolling 2 km exclusion corridor** around the live ambulance position over webhooks, so partner fleets reroute *before* they intersect.
-2. **Predicts golden-hour breach** every 10 seconds via a deterministic risk model fed by real Google Routes traffic + weather.
-3. **Auto-dispatches a drone** the moment the breach probability crosses threshold — no human in the path.
+---
 
-The whole thing runs on a polyglot, three-layer async pipeline that keeps the ambulance ingest hot path under 5 ms even during a chaos surge.
+### Pillar 1 — B2B Exclusion Corridor (Live, Working ✅)
+
+Every time a GPS ping arrives, Sipra recomputes a **2 km rolling exclusion corridor** around the ambulance's travel path using PostGIS `ST_Buffer(ST_MakeLine(...), 2000m)`. That polygon is immediately:
+
+- **Broadcast over WebSocket** to the Mission Control dashboard (Deck.gl map, pulsing overlay).
+- **Fan-out via HMAC-signed webhooks** to every registered B2B partner — Uber, Swiggy, food delivery fleets, or any logistics operator subscribed to the system.
+
+Partner fleets receive a compact GeoJSON polygon and can reroute their drivers **before** they physically enter the corridor. This is the core B2B value proposition: partner companies integrate once via webhook, and Sipra continuously keeps them informed of the live ambulance path. No polling, no phone calls, no manual dispatcher.
+
+```
+Ambulance ping → PostGIS ST_Buffer(2km) → versioned corridor row
+                                         → WS dashboard (real-time map)
+                                         → HMAC POST to Fleet Partner A
+                                         → HMAC POST to Fleet Partner B
+                                         → HMAC POST to Fleet Partner N
+```
+
+The corridor is **versioned and history-preserving** — old versions are stamped `valid_until = NOW()` rather than overwritten. This means the bounty engine can later verify which drivers were inside the corridor at claim time, using the correct historical polygon.
+
+---
+
+### Pillar 2 — Drone Failsafe (Live, Working ✅)
+
+Every 10 seconds, the **Risk Monitor** evaluates every active trip:
+
+1. Fetches the latest GPS ping and the trip's golden-hour deadline.
+2. Calls the **AI Brain** (`POST /predict`) — a Python FastAPI service that queries Google Routes for live traffic ETA, applies an OpenWeatherMap weather factor, and runs a logistic-sigmoid to produce a `breach_probability`.
+3. If `will_breach == true`, the Risk Monitor **autonomously transitions the trip to `DroneHandoff`**, calls the drone dispatch API, and broadcasts `HANDOFF_INITIATED` to the dashboard and all WebSocket clients.
+
+No human approves the drone call. The system makes the decision, executes it, and notifies all parties in the same 10-second cycle. The drone dispatch mock returns a `drone_id` and `eta_seconds`; the dashboard renders a `HandoffOverlay` with the incoming drone's ETA.
+
+```
+Risk Monitor tick
+  → AI Brain: breach_probability = sigmoid((deadline - eta) / 300s)
+  → if breach: trip.TransitionTo(DroneHandoff)
+             → POST /dispatch → drone_id + eta_seconds
+             → BroadcastHandoffInitiated → dashboard overlay
+```
+
+---
+
+### Pillar 3 — Async Pipeline (Never Blocks ✅)
+
+The ingest hot path returns `202` in under 5 ms regardless of what the corridor engine, AI brain, or webhook pool are doing. Three independent tickers — **5 s flush**, **10 s risk** — decouple every stage so a slow partner webhook or a stalled Postgres batch never delays the next ambulance ping.
 
 ---
 
@@ -178,40 +219,42 @@ Sipra's core design choice: **three independent tickers that never block each ot
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Amb as 🚑 Ambulance
+    participant Amb as Ambulance
     participant API as Go API
     participant R as Redis
-    participant F as Flusher (5s)
+    participant F as Flusher 5s
     participant PG as Postgres
     participant CE as Corridor Engine
     participant WS as WS Hub
-    participant W as Webhooks
-    participant RM as Risk Monitor (10s)
+    participant W as Webhook Pool
+    participant FL as Fleet Partners
+    participant RM as Risk Monitor 10s
     participant AI as AI Brain
-    participant DR as Drone
+    participant DR as Drone Dispatch
 
-    Note over Amb,API: ① INGEST (sub-5 ms)
+    Note over Amb,API: INGEST — sub-5 ms hot path
     Amb->>API: POST /trips/:id/pings
-    API->>R: HSET buffer
-    API-->>Amb: 202 Accepted
+    API->>R: HSET ping buffer
+    API-->>Amb: 202 Accepted immediately
 
-    Note over R,W: ② FLUSH (every 5 s)
-    F->>R: drain buffer
-    F->>PG: pgx.Batch INSERT
-    F->>CE: CalculateRollingCorridor(tripID)
-    CE->>PG: tx { close current; insert v#43;1 }
-    CE->>WS: BroadcastCorridorUpdate
-    CE->>W: BroadcastCorridor (worker pool)
+    Note over R,FL: FLUSH — every 5 s corridor broadcast
+    F->>R: drain ping buffer
+    F->>PG: pgx.Batch INSERT pings
+    F->>CE: CalculateRollingCorridor
+    CE->>PG: stamp old corridor valid_until, insert next version
+    CE->>WS: BroadcastCorridorUpdate to dashboard
+    CE->>W: fan-out corridor polygon to all partners
+    W->>FL: HMAC-signed POST exclusion zone
 
-    Note over RM,DR: ③ RISK (every 10 s)
-    RM->>PG: ListInTransit
-    RM->>AI: POST /predict
-    AI-->>RM: {will_breach, eta, ...}
+    Note over RM,DR: RISK — every 10 s breach check
+    RM->>PG: ListInTransit trips
+    RM->>AI: POST /predict with latest ping and deadline
+    AI-->>RM: breach_probability and predicted_eta
     RM->>WS: BroadcastRiskPrediction
     alt will_breach == true
-        RM->>PG: UPDATE status = DroneHandoff
-        RM->>DR: POST /dispatch
-        DR-->>RM: {drone_id, eta_seconds}
+        RM->>PG: UPDATE trip status to DroneHandoff
+        RM->>DR: POST /dispatch with trip coordinates
+        DR-->>RM: drone_id and eta_seconds
         RM->>WS: BroadcastHandoffInitiated
     end
 ```
