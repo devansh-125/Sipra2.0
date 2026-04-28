@@ -167,7 +167,7 @@ export default function IntakePortal() {
             className="w-full bg-transparent border border-blue-500/50 hover:border-blue-400 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300 shadow-[0_0_20px_-8px_rgba(59,130,246,0.5)] hover:shadow-[0_0_25px_-5px_rgba(59,130,246,0.6)] uppercase tracking-[0.2em] font-semibold py-6 transition-all duration-200"
           >
             <Play className="w-4 h-4 mr-2" />
-            Demo
+            Demo Google Solution Hackathon
           </Button>
 
         </form>
