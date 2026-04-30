@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { IndianRupee, WalletCards } from 'lucide-react';
@@ -48,6 +48,14 @@ function parsePoint(lat: string | null, lng: string | null, fallback: GeoPoint):
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function RewardsSettlementPage() {
+  return (
+    <Suspense fallback={<main style={{ height: '100vh' }} className="bg-background flex items-center justify-center text-white text-sm font-mono animate-pulse">Loading…</main>}>
+      <RewardsSettlementInner />
+    </Suspense>
+  );
+}
+
+function RewardsSettlementInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { hospital, isLoaded } = useHospitalVerification();

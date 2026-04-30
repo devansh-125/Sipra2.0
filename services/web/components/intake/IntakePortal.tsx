@@ -2,22 +2,21 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, Loader2, Zap } from 'lucide-react';
+import { ShieldCheck, Loader2, Play } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { createTrip, startTrip } from '@/lib/api';
+import { createTrip } from '@/lib/api';
 import { HOSPITALS } from './hospitals';
-import { TrustLedger } from '../../lib/trustLedger';
 
 const CARGO_OPTIONS = ['Liver', 'Heart', 'Volatile Vaccine', 'Blood Platelets'] as const;
 type CargoOption = (typeof CARGO_OPTIONS)[number];
 
 // Maps display labels to domain CargoCategory enum values accepted by the Go backend.
 const CARGO_TO_CATEGORY: Record<CargoOption, string> = {
-  'Liver': 'Organ',
-  'Heart': 'Organ',
+  'Liver':            'Organ',
+  'Heart':            'Organ',
   'Volatile Vaccine': 'Vaccine',
-  'Blood Platelets': 'Blood',
+  'Blood Platelets':  'Blood',
 };
 
 function defaultDeadline(): string {
@@ -33,12 +32,12 @@ const FIELD_CLASS =
 export default function IntakePortal() {
   const router = useRouter();
 
-  const [sourceId, setSourceId] = useState(HOSPITALS[0].id);
-  const [destId, setDestId] = useState(HOSPITALS[1].id);
-  const [cargo, setCargo] = useState<CargoOption>('Liver');
-  const [deadline, setDeadline] = useState(defaultDeadline);
+  const [sourceId, setSourceId]     = useState(HOSPITALS[0].id);
+  const [destId, setDestId]         = useState(HOSPITALS[1].id);
+  const [cargo, setCargo]           = useState<CargoOption>('Liver');
+  const [deadline, setDeadline]     = useState(defaultDeadline);
   const [submitting, setSubmitting] = useState(false);
-  const [sameError, setSameError] = useState(false);
+  const [sameError, setSameError]   = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,18 +48,18 @@ export default function IntakePortal() {
     }
     setSameError(false);
 
-    const src = HOSPITALS.find((h) => h.id === sourceId)!;
+    const src  = HOSPITALS.find((h) => h.id === sourceId)!;
     const dest = HOSPITALS.find((h) => h.id === destId)!;
 
     setSubmitting(true);
     try {
       const res = await createTrip({
-        origin: { lat: src.lat, lng: src.lng },
-        destination: { lat: dest.lat, lng: dest.lng },
-        cargo_category: CARGO_TO_CATEGORY[cargo],
-        cargo_description: cargo,
+        origin:               { lat: src.lat,  lng: src.lng  },
+        destination:          { lat: dest.lat, lng: dest.lng },
+        cargo_category:       CARGO_TO_CATEGORY[cargo],
+        cargo_description:    cargo,
         golden_hour_deadline: new Date(deadline).toISOString(),
-        ambulance_id: 'AMB-001',
+        ambulance_id:         'AMB-001',
       });
       router.push(`/dashboard?tripId=${res.trip_id}`);
     } catch (err) {
@@ -70,8 +69,6 @@ export default function IntakePortal() {
   }
 
   function handleDemoLaunch() {
-    TrustLedger.clear();
-    TrustLedger.addEvent('DEMO-MISSION', 'System Initialization', 'SIPRA Core', { info: 'Preparing identity verification module' });
     router.push('/demo/verification');
   }
 
@@ -167,11 +164,10 @@ export default function IntakePortal() {
           <Button
             type="button"
             onClick={handleDemoLaunch}
-            disabled={submitting}
             className="w-full bg-transparent border border-blue-500/50 hover:border-blue-400 hover:bg-blue-500/10 text-blue-400 hover:text-blue-300 shadow-[0_0_20px_-8px_rgba(59,130,246,0.5)] hover:shadow-[0_0_25px_-5px_rgba(59,130,246,0.6)] uppercase tracking-[0.2em] font-semibold py-6 transition-all duration-200"
           >
-            <Zap className="w-4 h-4 mr-2" />
-            Demo Hackathon
+            <Play className="w-4 h-4 mr-2" />
+            Demo Google Solution Hackathon
           </Button>
 
         </form>

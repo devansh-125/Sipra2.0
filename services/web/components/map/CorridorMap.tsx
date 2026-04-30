@@ -17,10 +17,49 @@ import { useHospitalNames } from '../../hooks/useHospitalNames';
 import { useCorridorGeometry } from '../../hooks/useCorridorGeometry';
 import type { FleetVehicle, GeoPoint, HandoffInitiatedPayload } from '../../lib/types';
 
-// Default viewport: Lucknow — matches the Medanta → Tender Palm route.
-const DEFAULT_CENTER = { lat: 26.82, lng: 80.97 };
-const FLEET_WS_URL = process.env.NEXT_PUBLIC_SIM_WS_URL ?? 'ws://localhost:4001';
-const SIM_WS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SIM_WS === 'true';
+// ---------------------------------------------------------------------------
+// Map Defaults
+// ---------------------------------------------------------------------------
+const DEFAULT_CENTER  = { lat: 12.9716, lng: 77.5946 }; // Bangalore
+
+// 2 km exclusion zone radius (metres)
+const EXCLUSION_RADIUS_M  = 2_000;
+const EXCLUSION_RADIUS_KM = EXCLUSION_RADIUS_M / 1_000;
+
+// 3 km warning zone radius (metres)
+const WARNING_RADIUS_M = 3_000;
+const WARNING_RADIUS_KM = WARNING_RADIUS_M / 1_000;
+
+// Drone flight duration from ambulance stop-point to destination
+const DRONE_FLIGHT_MS = 45_000;
+
+// ---------------------------------------------------------------------------
+// Purple drone SVG (top-down 4-rotor) — used by the handoff IconLayer
+// ---------------------------------------------------------------------------
+const DRONE_ICON_URL =
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
+    '<line x1="14" y1="14" x2="50" y2="50" stroke="#7c3aed" stroke-width="4" stroke-linecap="round"/>' +
+    '<line x1="50" y1="14" x2="14" y2="50" stroke="#7c3aed" stroke-width="4" stroke-linecap="round"/>' +
+    '<circle cx="14" cy="14" r="8" fill="#a78bfa" stroke="#581c87" stroke-width="1.5"/>' +
+    '<circle cx="50" cy="14" r="8" fill="#a78bfa" stroke="#581c87" stroke-width="1.5"/>' +
+    '<circle cx="14" cy="50" r="8" fill="#a78bfa" stroke="#581c87" stroke-width="1.5"/>' +
+    '<circle cx="50" cy="50" r="8" fill="#a78bfa" stroke="#581c87" stroke-width="1.5"/>' +
+    '<circle cx="32" cy="32" r="9" fill="#7c3aed" stroke="#ffffff" stroke-width="2"/>' +
+    '</svg>',
+  )}`;
+
+// ---------------------------------------------------------------------------
+// Haversine distance helper (km)
+// ---------------------------------------------------------------------------
+const DEG = Math.PI / 180;
+function haversineKm(a: GeoPoint, b: GeoPoint): number {
+  const dLat = (b.lat - a.lat) * DEG;
+  const dLng = (b.lng - a.lng) * DEG;
+  const s = Math.sin(dLat / 2) ** 2 +
+    Math.cos(a.lat * DEG) * Math.cos(b.lat * DEG) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6_371 * Math.asin(Math.min(1, Math.sqrt(s)));
+}
 
 // --------------------------------------------------------------------------
 // DeckGLOverlay
@@ -241,24 +280,8 @@ function MapScene({
   const directionsCalledRef = useRef(false);
 
   useEffect(() => {
-    if (!SIM_WS_ENABLED || !FLEET_WS_URL) {
-      setFleet([]);
-      return;
-    }
-
-    let ws: WebSocket;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-    const connect = () => {
-      ws = new WebSocket(FLEET_WS_URL);
-      ws.onmessage = ({ data }) => {
-        try { setFleet(JSON.parse(data as string) as FleetVehicle[]); } catch { /* ignore */ }
-      };
-      ws.onclose = () => { reconnectTimer = setTimeout(connect, 3_000); };
-      ws.onerror = () => ws.close();
-    };
-    connect();
-    return () => { ws?.close(); clearTimeout(reconnectTimer); };
-  }, []);
+    if (!map || directionsCalledRef.current) return;
+    if (typeof google === 'undefined' || !google.maps?.DirectionsService) return;
 
     if (!origin || !destination) return;
 

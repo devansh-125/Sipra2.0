@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, FileCheck, BrainCircuit, MailCheck, ShieldAlert, Fingerprint, Loader2, ArrowRight, UploadCloud, XCircle } from 'lucide-react';
+import { ShieldCheck, FileCheck, BrainCircuit, ShieldAlert, Fingerprint, Loader2, ArrowRight, XCircle } from 'lucide-react';
 import { useHospitalVerification } from '@/hooks/useHospitalVerification';
 import { TrustLedger } from '../../lib/trustLedger';
 
@@ -32,14 +32,6 @@ export function HospitalVerificationPortal() {
         purpose: 'Priority Organ Transport',
     });
 
-    const [otpSent, setOtpSent] = useState(false);
-    const [otpCode, setOtpCode] = useState('');
-    const [devOtpHint, setDevOtpHint] = useState('');
-
-    // File Upload State
-    const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
     // AI Scanner State
     const [scanPhase, setScanPhase] = useState<'idle' | 'scanning_text' | 'checking_signatures' | 'verifying_db'>('idle');
 
@@ -58,108 +50,27 @@ export function HospitalVerificationPortal() {
         }
     };
 
-    const handleSendOTP = async () => {
-        setIsProcessing(true);
-        setErrorMsg('');
-        try {
-            const res = await fetch('/api/send-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: form.email })
-            });
-            const data = await res.json();
-
-            if (res.ok) {
-                setOtpSent(true);
-                setStatus('UNVERIFIED');
-                if (data.devOtp) {
-                    setDevOtpHint(String(data.devOtp));
-                    setOtpCode(String(data.devOtp));
-                } else {
-                    setDevOtpHint('');
-                }
-                TrustLedger.addEvent('DEMO-MISSION', 'OTP Requested', form.name, { email: form.email, result: 'Pending' });
-            } else {
-                setErrorMsg(data.error || 'Failed to send OTP.');
-            }
-        } catch (err) {
-            setErrorMsg('Network error sending OTP');
-        } finally {
-            setIsProcessing(false);
-        }
-    };
-
-    const handleVerifyOTP = async () => {
-        if (!otpCode || otpCode.length < 4) return;
-        setIsProcessing(true);
-        setErrorMsg('');
-        try {
-            const res = await fetch('/api/verify-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: form.email, otp: otpCode })
-            });
-
-            if (res.ok) {
-                setStatus('OTP VERIFIED');
-                setStep(3); // Unlocks Doc Upload
-                TrustLedger.addEvent('DEMO-MISSION', 'OTP Verification', 'System Auth', { method: 'Email OTP', result: 'Success', hospital: form.name });
-            } else {
-                const data = await res.json();
-                setErrorMsg(data.error || 'Invalid OTP');
-            }
-        } catch (err) {
-            setErrorMsg('Network error verifying OTP');
-        } finally {
-            setIsProcessing(false);
-        }
-    };
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files.length > 0) {
-            const file = e.target.files[0];
-            setSelectedFile(file);
-            setPreviewUrl(URL.createObjectURL(file));
-        }
-    };
-
-    const handleUploadAndAnalyze = async () => {
-        if (!selectedFile) {
-            setErrorMsg('Please upload a document first.');
-            return;
-        }
-
+    const handleVerify = async () => {
         setIsProcessing(true);
         setErrorMsg('');
 
-        // Simulate AI Scanning visual flow
         setScanPhase('scanning_text');
-        await new Promise(r => setTimeout(r, 1200));
+        await new Promise(r => setTimeout(r, 1100));
         setScanPhase('checking_signatures');
-        await new Promise(r => setTimeout(r, 1200));
+        await new Promise(r => setTimeout(r, 1100));
         setScanPhase('verifying_db');
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 900));
         setScanPhase('idle');
 
-        // Calculate Trust Score based on license
-        let calculatedScore = 50;
-        let finalStatus: UIStatus = 'PENDING REVIEW';
-
-        if (form.license.startsWith('GOV-')) {
-            calculatedScore = 92;
-            finalStatus = 'VERIFIED';
-        } else if (form.license.startsWith('PVT-')) {
-            calculatedScore = 78;
-            finalStatus = 'PENDING REVIEW';
-        } else {
-            calculatedScore = 32;
-            finalStatus = 'REJECTED';
-        }
+        const calculatedScore = form.license.startsWith('GOV-') ? 92 : form.license.startsWith('PVT-') ? 78 : 32;
+        const finalStatus: UIStatus = form.license.startsWith('GOV-') ? 'VERIFIED' : form.license.startsWith('PVT-') ? 'PENDING REVIEW' : 'REJECTED';
 
         setTrustScore(calculatedScore);
         setStatus(finalStatus);
         setIsProcessing(false);
-        setStep(4); // Locks previous steps, shows Results
+        setStep(4);
+
+        TrustLedger.addEvent('DEMO-MISSION', 'AI Verification', 'SIPRA Auth Engine', { hospital: form.name, score: calculatedScore, result: finalStatus });
     };
 
     const handleComplete = () => {
@@ -195,9 +106,9 @@ export function HospitalVerificationPortal() {
                                     <ShieldCheck className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
                                     <p>1. Institutional Registration & Identity</p>
                                 </div>
-                                <div className={`flex items-start gap-3 transition-opacity ${step >= 3 ? 'opacity-100' : 'opacity-40'}`}>
+                                <div className={`flex items-start gap-3 transition-opacity ${step >= 4 ? 'opacity-100' : 'opacity-40'}`}>
                                     <FileCheck className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
-                                    <p>2. Medical License Verification Scan</p>
+                                    <p>2. AI Document Analysis</p>
                                 </div>
                                 <div className={`flex items-start gap-3 transition-opacity ${step === 4 ? 'opacity-100' : 'opacity-40'}`}>
                                     <BrainCircuit className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
@@ -225,132 +136,56 @@ export function HospitalVerificationPortal() {
                 {/* Right Column: Dynamic Steps */}
                     <div className="space-y-6 lg:col-span-8 xl:col-span-9">
 
-                    {/* Step 1 & 2: Form & OTP */}
-                    {step <= 3 && (
-                        <div className={`p-6 md:p-7 rounded-2xl bg-slate-900/75 border border-slate-700/70 shadow-[0_30px_60px_-35px_rgba(15,23,42,0.95)] transition-all ${step > 2 ? 'opacity-60 pointer-events-none' : ''}`}>
+                    {/* Step 1: Form + Verify button */}
+                    {step === 1 && (
+                        <div className="p-6 md:p-7 rounded-2xl bg-slate-900/75 border border-slate-700/70 shadow-[0_30px_60px_-35px_rgba(15,23,42,0.95)]">
                             <h2 className="text-3xl font-bold text-white mb-5">1. Entity Registration</h2>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                                 <div>
                                     <label className="text-xs uppercase text-slate-400 mb-1.5 block tracking-[0.12em]">Hospital Name *</label>
-                                    <input type="text" className={INPUT_STYLE} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={otpSent} />
+                                    <input type="text" className={INPUT_STYLE} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
                                 </div>
                                 <div>
                                     <label className="text-xs uppercase text-slate-400 mb-1.5 block tracking-[0.12em]">Registration/License ID *</label>
-                                    <input type="text" className={INPUT_STYLE} value={form.license} onChange={(e) => setForm({ ...form, license: e.target.value })} placeholder="GOV-..." disabled={otpSent} />
+                                    <input type="text" className={INPUT_STYLE} value={form.license} onChange={(e) => setForm({ ...form, license: e.target.value })} placeholder="GOV-..." />
                                     <p className="text-[10px] text-slate-500 mt-1">Hint: GOV- yields high trust, PVT- yields review</p>
                                 </div>
                                 <div>
                                     <label className="text-xs uppercase text-slate-400 mb-1.5 block tracking-[0.12em]">Official Email *</label>
-                                    <input type="email" className={INPUT_STYLE} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} disabled={otpSent} />
+                                    <input type="email" className={INPUT_STYLE} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
                                 </div>
                                 <div>
                                     <label className="text-xs uppercase text-slate-400 mb-1.5 block tracking-[0.12em]">Phone Number *</label>
-                                    <input type="text" className={INPUT_STYLE} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} disabled={otpSent} />
+                                    <input type="text" className={INPUT_STYLE} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
                                 </div>
                             </div>
 
-                            {!otpSent ? (
+                            {scanPhase !== 'idle' ? (
+                                <div className="w-full max-w-sm mt-2">
+                                    <div className="flex justify-between text-xs text-indigo-400 mb-1 uppercase tracking-widest font-semibold">
+                                        <span>AI Scanning</span>
+                                        <span className="animate-pulse">
+                                            {scanPhase === 'scanning_text' && 'Extracting identity...'}
+                                            {scanPhase === 'checking_signatures' && 'Verifying signatures...'}
+                                            {scanPhase === 'verifying_db' && 'Cross-referencing DB...'}
+                                        </span>
+                                    </div>
+                                    <div className="h-1 bg-slate-800 rounded overflow-hidden">
+                                        <div className="h-full bg-indigo-500 rounded transition-all duration-300" style={{
+                                            width: scanPhase === 'scanning_text' ? '30%' : scanPhase === 'checking_signatures' ? '65%' : '92%'
+                                        }} />
+                                    </div>
+                                </div>
+                            ) : (
                                 <button
-                                    onClick={handleSendOTP}
+                                    onClick={handleVerify}
                                     disabled={isProcessing}
-                                    className="bg-blue-600 hover:bg-blue-500 text-white font-medium px-5 py-2.5 rounded-lg shadow flex items-center justify-center transition-colors"
+                                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium px-6 py-2.5 rounded-lg shadow flex items-center justify-center transition-colors"
                                 >
-                                    {isProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <MailCheck className="w-4 h-4 mr-2" />}
-                                    Send Security OTP
+                                    {isProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BrainCircuit className="w-4 h-4 mr-2" />}
+                                    Begin AI Verification
                                 </button>
-                            ) : (
-                                <div className="bg-blue-900/20 border border-blue-500/30 p-4 rounded-xl mt-4 animate-in fade-in slide-in-from-top-2">
-                                    <p className="text-sm text-blue-300 mb-3 block">✓ OTP sent to official hospital email ({form.email})</p>
-                                    <div className="flex flex-col sm:flex-row gap-2">
-                                        <input
-                                            type="text"
-                                            className={`${INPUT_STYLE} font-mono tracking-widest w-full sm:w-44 text-center text-lg`}
-                                            placeholder="1234"
-                                            value={otpCode}
-                                            onChange={(e) => setOtpCode(e.target.value)}
-                                            maxLength={6}
-                                            disabled={step > 2}
-                                        />
-                                        <button
-                                            onClick={handleVerifyOTP}
-                                            disabled={isProcessing || otpCode.length < 4 || step > 2}
-                                            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium px-6 py-2.5 rounded-lg shadow transition-colors"
-                                        >
-                                            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Verify Code'}
-                                        </button>
-                                    </div>
-                                    {devOtpHint && (
-                                        <p className="text-xs text-amber-300 mt-2">
-                                            Dev mode OTP: <span className="font-mono tracking-widest">{devOtpHint}</span>
-                                        </p>
-                                    )}
-                                    <p className="text-[10px] text-slate-500 mt-3 pt-2 border-t border-blue-500/20">
-                                        Check your email inbox or demo terminal for the OTP.
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Step 3: Document Upload */}
-                    {step === 3 && (
-                        <div className="p-6 md:p-7 rounded-2xl bg-slate-900/75 border border-slate-700/70 shadow-[0_30px_60px_-35px_rgba(15,23,42,0.95)] animate-in fade-in slide-in-from-right-4">
-                            <div className="flex items-center gap-3 mb-4">
-                                <FileCheck className="w-5 h-5 text-indigo-400" />
-                                <h2 className="text-lg font-semibold text-white">2. Medical License Upload</h2>
-                            </div>
-                            <p className="text-base text-slate-300/90 mb-6">Please upload a valid hospital license or government ID to verify authenticity.</p>
-
-                            {!selectedFile ? (
-                                <label className="cursor-pointer border-2 border-dashed border-slate-600 hover:border-indigo-500 hover:bg-indigo-500/5 rounded-2xl p-10 md:p-12 min-h-[260px] flex flex-col items-center justify-center text-center transition-all">
-                                    <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileChange} />
-                                    <div className="bg-slate-800 p-4 rounded-full mb-4">
-                                        <UploadCloud className="w-8 h-8 text-indigo-400" />
-                                    </div>
-                                    <p className="text-sm text-slate-300 font-medium tracking-wide">Click or drag document to upload</p>
-                                    <p className="text-xs text-slate-500 mt-1">PDF, JPEG, or PNG up to 10MB</p>
-                                </label>
-                            ) : (
-                                <div className="border border-slate-700 rounded-2xl p-6 flex flex-col items-center text-center animate-in zoom-in-95 bg-slate-950/30">
-                                    {previewUrl && (
-                                        <div className="w-48 h-32 mb-4 border border-slate-600 rounded bg-black flex items-center justify-center overflow-hidden">
-                                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            <img src={previewUrl} alt="Document preview" className="object-cover w-full h-full opacity-80" />
-                                        </div>
-                                    )}
-                                    <p className="text-sm font-medium text-white break-all mb-4">{selectedFile.name}</p>
-
-                                    {scanPhase !== 'idle' ? (
-                                        <div className="w-full max-w-sm mt-2">
-                                            <div className="flex justify-between text-xs text-indigo-400 mb-1 uppercase tracking-widest font-semibold">
-                                                <span>AI Scanning</span>
-                                                <span className="animate-pulse">
-                                                    {scanPhase === 'scanning_text' && 'Extracting text...'}
-                                                    {scanPhase === 'checking_signatures' && 'Verifying signatures...'}
-                                                    {scanPhase === 'verifying_db' && 'Cross-referencing DB...'}
-                                                </span>
-                                            </div>
-                                            <div className="h-1 bg-slate-800 rounded overflow-hidden">
-                                                <div className="h-full bg-indigo-500 rounded transition-all duration-300" style={{
-                                                    width: scanPhase === 'scanning_text' ? '30%' : scanPhase === 'checking_signatures' ? '60%' : '90%'
-                                                }}></div>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="flex gap-4">
-                                            <button onClick={() => setSelectedFile(null)} disabled={isProcessing} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition">Remove</button>
-                                            <button
-                                                onClick={handleUploadAndAnalyze}
-                                                disabled={isProcessing}
-                                                className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-6 py-2 rounded shadow-lg shadow-indigo-500/20 flex items-center justify-center transition-colors"
-                                            >
-                                                <BrainCircuit className="w-4 h-4 mr-2" />
-                                                Analyze Document
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
                             )}
                         </div>
                     )}

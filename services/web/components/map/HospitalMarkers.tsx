@@ -6,17 +6,7 @@ import { ScenegraphLayer } from '@deck.gl/mesh-layers';
 import type { Layer } from '@deck.gl/core';
 import type { GeoPoint } from '../../lib/types';
 
-// ---------------------------------------------------------------------------
-// Hospital cross SVG icon (white circle, red cross)
-// ---------------------------------------------------------------------------
-const HOSPITAL_ICON_URL =
-  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">' +
-    '<circle cx="24" cy="24" r="22" fill="white" stroke="#dc2626" stroke-width="2.5"/>' +
-    '<rect x="20" y="10" width="8" height="28" rx="2" fill="#dc2626"/>' +
-    '<rect x="10" y="20" width="28" height="8" rx="2" fill="#dc2626"/>' +
-    '</svg>',
-  )}`;
+const HOSPITAL_GLB_URL = '/models/hospital.glb';
 
 interface HospitalPoint {
   position:  [number, number, number];
