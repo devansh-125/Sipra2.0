@@ -27,17 +27,17 @@
 4. [Tech Stack](#%EF%B8%8F-tech-stack)
 5. [System Architecture](#%EF%B8%8F-system-architecture)
 6. [Data Flow Diagrams](#-data-flow-diagrams)
-7. [Folder Structure](#-folder-structure)
-8. [Installation & Setup](#-installation--setup)
+<!-- 7. [Folder Structure](#-folder-structure) -->
+<!-- 8. [Installation & Setup](#-installation--setup)
 9. [Usage Guide](#-usage-guide)
 10. [API Reference](#-api-reference)
 11. [WebSocket Contract](#-websocket-contract)
 12. [Screenshots](#-screenshots)
-13. [Core Logic & Algorithms](#-core-logic--algorithms)
-14. [Edge Cases](#-edge-cases-handled--missing)
-15. [Future Improvements](#%EF%B8%8F-future-improvements)
-16. [Contribution Guidelines](#-contribution-guidelines)
-17. [License](#-license)
+13. [Core Logic & Algorithms](#-core-logic--algorithms) -->
+7. [Edge Cases](#-edge-cases-handled--missing)
+8. [Future Improvements](#%EF%B8%8F-future-improvements)
+<!-- 16. [Contribution Guidelines](#-contribution-guidelines)
+17. [License](#-license) -->
 
 ---
 
@@ -369,6 +369,7 @@ graph TD
 
 ---
 
+<!--
 ## 📁 Folder Structure
 
 ```
@@ -466,8 +467,9 @@ sipra/
     ├── diagrams/                     # exported architecture renders
     └── screenshots/                  # per-page UI captures
 ```
+-->
 
----
+<!-- ---
 
 ## 🚀 Installation & Setup
 
@@ -563,9 +565,9 @@ make core      # cd services/core-go && go run ./cmd/server
 make web       # cd services/web && npm run dev
 ```
 
----
+--- -->
 
-## 🎮 Usage Guide
+<!-- ## 🎮 Usage Guide
 
 ### Operator Flow — Intake → Mission Control
 
@@ -624,8 +626,9 @@ Expected output:
 ✅  All assertions passed
 ```
 
----
+--- -->
 
+<!--
 ## 📡 API Reference
 
 ### Go Core API — `:8080`
@@ -681,8 +684,11 @@ Expected output:
 | `GET` | `/api/places/nearby` | Nearby search |
 | `GET` | `/api/places/search` | Text search |
 
+-->
+
 ---
 
+<!--
 ## 🔌 WebSocket Contract
 
 All real-time updates flow over a **single connection** at `ws://localhost:8080/ws/dashboard`. Every message is a discriminated-union envelope:
@@ -715,8 +721,11 @@ type Envelope =
 
 The frontend type definition lives in [`services/web/lib/types.ts`](services/web/lib/types.ts) and **mirrors the Go DTO field names exactly** (snake_case JSON via type aliases).
 
+-->
+
 ---
 
+<!--
 ## 📸 Screenshots
 
 > Capture each shot at **1440 × 900** with the simulator running (`npm run simulate`) so corridors, fleet, and panels are populated.
@@ -770,8 +779,11 @@ Scenario buttons that fan out to `/api/v1/chaos/*`. Gated on `NEXT_PUBLIC_CHAOS_
 
 ![God-Mode Simulator](docs/screenshots/08-simulator.png)
 
+-->
+
 ---
 
+<!--
 ## 🧠 Core Logic & Algorithms
 
 ### Rolling Exclusion Corridor (PostGIS)
@@ -840,8 +852,11 @@ SELECT ST_DWithin(
 
 The Risk Monitor polls every 10 s × every InTransit trip. A 200 ms LLM call per trip per cycle blows the SLA. The deterministic sigmoid runs in microseconds and is bit-exact reproducible. **`ai_reasoning` (the user-facing string) is the right place to swap in an LLM** — see [`datasets/test-scenarios/SCENARIOS.md §1`](datasets/test-scenarios/SCENARIOS.md).
 
+-->
+
 ---
 
+<!--
 ## 🛡️ Edge Cases — Handled & Missing
 
 ### Handled ✅
@@ -866,6 +881,8 @@ The Risk Monitor polls every 10 s × every InTransit trip. A 200 ms LLM call per
 - **Frontend error boundary** — guard `MissionControlLayout` so a render failure doesn't unmount the WS.
 - **Distributed tracing** — OpenTelemetry across Go ↔ Python ↔ Node mocks.
 
+-->
+
 ---
 
 ## 🛣️ Future Improvements
@@ -878,7 +895,7 @@ The Risk Monitor polls every 10 s × every InTransit trip. A 200 ms LLM call per
 6. **End-to-end encryption** — wrap WS payloads with libsodium for hospital-to-dashboard sensitive metadata.
 7. **Rust rewrite of the corridor engine** — explore SIMD-accelerated `ST_Buffer` if the partner count grows past 1k.
 
----
+<!-- ---
 
 ## 🤝 Contribution Guidelines
 
@@ -896,13 +913,8 @@ The Risk Monitor polls every 10 s × every InTransit trip. A 200 ms LLM call per
    (cd services/ai-brain && pytest)
    (cd services/web && npm run type-check && npm run build)
    ```
-7. **Sign your commits** if you're contributing to the Solutions Challenge submission.
+7. **Sign your commits** if you're contributing to the Solutions Challenge submission. -->
 
----
-
-## 📜 License
-
-TBD — pending Solutions Challenge 2026 submission terms.
 
 ---
 
@@ -910,6 +922,6 @@ TBD — pending Solutions Challenge 2026 submission terms.
 
 ### **Sipra** — *Because every minute past the golden hour costs a life.*
 
-Made with ❤️ for **Google Solutions Challenge 2026**.
+Made with ❤️ By Devansh & Kinshuk for **Google Solutions Challenge 2026**.
 
 </div>
