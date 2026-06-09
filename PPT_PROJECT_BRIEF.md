@@ -303,13 +303,13 @@ flowchart TB
 ```
 
 ### 7. Technologies to Be Used in the Solution
-- **Backend**: Go, Fiber, pgx, Redis client, Zerolog
-- **Data and geo**: PostgreSQL 16, PostGIS 3.4, Redis 7
-- **AI services**: FastAPI risk service, Gemma integration via Generative Language API
-- **Frontend**: Next.js 14, TypeScript, deck.gl, `@vis.gl/react-google-maps`
-- **Google stack**: Maps JavaScript API, Places API, Directions API, Gemma model APIs
-- **Service integration**: Node/Express partner and aerial endpoints
-- **Infra**: Docker Compose, health and metrics observability
+- **Backend (Go 1.26 + Fiber)**: The core mission engine runs in Go for low-latency ingest and deterministic orchestration, with Fiber for REST and WebSocket delivery, pgx for Postgres, and Zerolog for structured ops logging.
+- **Data + Geo (Postgres 16 + PostGIS 3.4 + Redis 7)**: PostGIS powers corridor geometry and spatial verification, while Redis buffers high-frequency pings to keep the hot path sub-5 ms and resilient to downstream latency.
+- **AI Risk Brain (Python 3.11 + FastAPI)**: A separate FastAPI service computes breach probability and ETA risk, enabling autonomous handoff decisions without blocking the core pipeline.
+- **Frontend (Next.js 14 + TypeScript + deck.gl)**: The mission dashboard is a real-time control surface with deck.gl for corridor overlays and `@vis.gl/react-google-maps` for map rendering at scale.
+- **Google ecosystem**: Maps JavaScript API, Places API, and Directions API provide routing and hospital discovery, while Gemma model APIs drive narrative intelligence and decision summaries.
+- **Partner + Drone integrations (Node/Express mocks)**: Fleet and aerial endpoints receive signed webhooks and dispatch requests, mirroring real partner integrations for demos and testing.
+- **Infra + observability (Docker Compose + Prometheus)**: Containers standardize the stack, and metrics endpoints expose health and performance for live demos and ops readiness.
 
 ### 8. Estimated Implementation Cost (Optional)
 Assumption: 12-week MVP, India-based implementation.
