@@ -120,7 +120,7 @@ The ingest hot path returns `202` in under 5 ms regardless of what the corridor 
 - 🟢 **Drone failsafe** — Risk Monitor transitions `InTransit → DroneHandoff`, calls drone dispatch, broadcasts to dashboard.
 - 🟢 **Surge-pricing bounty engine** — PostGIS `ST_DWithin` checkpoint verification + multiplier; partner drivers earn points.
 - 🟢 **God-mode demo simulator** — 20 fleet vehicles on real Bangalore roads, ambulance on a Google-Directions polyline.
-- 🟢 **Chaos panel** — flood a bridge, spawn fleets, force a handoff, all from `/admin/chaos`.
+- 🟢 **Recorded scenario replays** — run `s1-normal`, `s2-congestion`, `s3-drone-handoff` from `datasets/test-scenarios/realtime/`.
 - 🟢 **Prometheus metrics** at `/metrics` — corridor compute duration, WS clients, handoffs triggered.
 
 ---
@@ -202,7 +202,7 @@ graph TB
     WSHUB -->|WS| DRV
     DRV -->|claim| BNT
     BNT --> PG
-    REST -.chaos sim.-> VAL
+    REST -.sim.-> VAL
 
     classDef core fill:#1e293b,stroke:#3b82f6,color:#fff
     classDef data fill:#7c2d12,stroke:#ea580c,color:#fff
@@ -337,7 +337,6 @@ graph TD
     Layout --> Intake["/intake<br/>IntakePortal"]
     Layout --> Dash["/dashboard<br/>MissionControlLayout"]
     Layout --> Driver["/driver/[tripId]<br/>DriverShell"]
-    Layout --> Admin["/admin/chaos<br/>ChaosPanel (gated)"]
 
     Dash --> CM[CorridorMap<br/>Deck.gl]
     Dash --> TP[TripPanel]
@@ -420,7 +419,6 @@ sipra/
 │   │   │   ├── intake/page.tsx       # IntakePortal
 │   │   │   ├── dashboard/page.tsx    # MissionControlLayout
 │   │   │   ├── driver/[tripId]/page.tsx
-│   │   │   ├── admin/chaos/page.tsx
 │   │   │   └── api/                  # Server-side proxies for Google APIs
 │   │   │       ├── route/directions/
 │   │   │       └── places/{hospitals,nearby,search}/
@@ -428,7 +426,6 @@ sipra/
 │   │   │   ├── intake/               # IntakePortal + hospitals.ts
 │   │   │   ├── mission-control/      # 9 panels (Layout, Trip, Status, Handoff, …)
 │   │   │   ├── driver/               # DriverShell, ExitRouteCard, BountyModal
-│   │   │   ├── chaos/                # ChaosPanel, ScenarioButton
 │   │   │   ├── map/                  # CorridorMap, ExclusionPolygon, FleetSwarm…
 │   │   │   └── ui/                   # shadcn primitives
 │   │   ├── hooks/                    # useSipraWebSocket, useDriverProximity, …
@@ -444,7 +441,6 @@ sipra/
 │   ├── play-scenario.ts              # plays a recorded NDJSON scenario
 │   ├── realtime-ingest.ts            # streams pings into the live backend
 │   ├── run-demo-scenario.ts          # high-level demo orchestrator
-│   ├── chaos-flood-bridge.{sh,ps1}   # chaos demos
 │   └── package.json / tsconfig.json
 │
 ├── test-tools/                       # Heavy E2E harnesses
@@ -459,8 +455,7 @@ sipra/
 │   │   └── webhook-partners.sample.sql
 │   └── test-scenarios/
 │       ├── SCENARIOS.md              # source of truth for demo scenarios
-│       ├── trips/                    # 5 trip seed files
-│       └── realtime/                 # 8 fully-recorded scenario folders
+│       └── realtime/                 # 3 recorded scenario folders
 │
 └── docs/                             # 📸 README assets
     ├── diagrams/                     # exported architecture renders
@@ -501,9 +496,6 @@ GOOGLE_MAPS_API_KEY=<your-key>
 # Optional — falls back to mock weather if absent
 OPENWEATHERMAP_API_KEY=<your-key>
 
-# Toggle chaos panel + chaos endpoints (dev only)
-CHAOS_ENABLED=true
-NEXT_PUBLIC_CHAOS_ENABLED=true
 ```
 
 ### Step 2 — Start infrastructure
@@ -519,9 +511,9 @@ docker compose up -d
 | `sipra-ai-brain` | 8000 | FastAPI prediction engine |
 | `sipra-fleet-receiver` | 4000 | Mock B2B fleet partner |
 | `sipra-drone-dispatch` | 4003 | Mock drone dispatcher |
-| `sipra-valhalla` | 8002 | Routing tiles (chaos sim) |
+| `sipra-valhalla` | 8002 | Routing tiles (simulator) |
 
-> ⚠️ Valhalla downloads ~1 GB of OSM tiles on first start. Wait until `docker compose ps` shows it `healthy` before running the chaos sim.
+> ⚠️ Valhalla downloads ~1 GB of OSM tiles on first start. Wait until `docker compose ps` shows it `healthy` before running the simulator.
 
 ### Step 3 — Run the Go core
 
@@ -581,27 +573,15 @@ make web       # cd services/web && npm run dev
 3. When the driver enters the corridor, a `BountyModal` offers a reward for rerouting.
 4. Verifying the reroute hits `POST /api/v1/bounties/:id/verify` and adds points to the local wallet.
 
-### Chaos Flow — Dev only
-
-1. Set `CHAOS_ENABLED=true` (Go core) and `NEXT_PUBLIC_CHAOS_ENABLED=true` (Next.js).
-2. Visit `http://localhost:3000/admin/chaos` — every button POSTs to a `/api/v1/chaos/*` endpoint.
-3. Or trigger from CLI:
-
-   ```bash
-   bash scripts/chaos-flood-bridge.sh
-   .\scripts\chaos-flood-bridge.ps1      # Windows
-   ```
-
 ### Recorded Scenarios
 
-Eight playable scenarios under `datasets/test-scenarios/realtime/` — see [SCENARIOS.md](datasets/test-scenarios/SCENARIOS.md).
+Three playable scenarios under `datasets/test-scenarios/realtime/` — see [SCENARIOS.md](datasets/test-scenarios/SCENARIOS.md).
 
 ```bash
 cd scripts
-npm run play:congestion               # NH-48 incident, golden-hour breach
-npm run play:spike                    # 80 → 8 kph mid-route accident
-npm run play:jitter                   # GPS dupes / OOB / gaps
-npm run play:peak                     # peak-hour MG Road
+npm run play:s1-normal
+npm run play:s2-congestion
+npm run play:s3-drone-handoff
 ```
 
 ### End-to-End Test
@@ -758,13 +738,7 @@ Partner driver enters the corridor, claims the bounty, and earns points after `S
 
 ![Bounty Modal](docs/screenshots/06-bounty-modal.png)
 
-### 7. Admin Chaos Panel — `/admin/chaos`
-
-Scenario buttons that fan out to `/api/v1/chaos/*`. Gated on `NEXT_PUBLIC_CHAOS_ENABLED`.
-
-![Chaos Panel](docs/screenshots/07-chaos-panel.png)
-
-### 8. God-Mode Simulator (terminal)
+### 7. God-Mode Simulator (terminal)
 
 20 fleet vehicles on real Bangalore roads, ambulance on a Google-Directions polyline, live corridor reroutes streamed over `:4001`.
 

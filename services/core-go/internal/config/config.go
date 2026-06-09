@@ -28,6 +28,7 @@ type Config struct {
 	WebhookTimeoutMS int `env:"WEBHOOK_TIMEOUT_MS" envDefault:"5000"`
 
 	AiBrainURL        string `env:"AI_BRAIN_URL"           envDefault:"http://localhost:8000"`
+	AiBrainAPIKey     string `env:"AI_BRAIN_API_KEY"       envDefault:""`
 	RiskPollIntervalS int    `env:"RISK_POLL_INTERVAL_SEC" envDefault:"10"`
 	AiBrainTimeoutMS  int    `env:"AI_BRAIN_TIMEOUT_MS"    envDefault:"3000"`
 	MockDroneURL      string `env:"MOCK_DRONE_URL"         envDefault:"http://localhost:4003"`

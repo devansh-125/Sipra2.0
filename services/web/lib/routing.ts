@@ -265,7 +265,7 @@ async function resolveRoute(
     const res = await fetch(`/api/route/directions?${params.toString()}`, {
       signal: AbortSignal.timeout(8_000),
     });
-    if (res.ok) {
+    if (res.ok && res.status !== 204) {
       const json = await res.json() as {
         polylineEncoded?: string;
         etaSeconds?: number;

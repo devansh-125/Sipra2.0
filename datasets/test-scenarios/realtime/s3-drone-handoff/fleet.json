@@ -1,0 +1,61 @@
+{
+  "snapshot_at_seconds_into_trip": 300,
+  "ambulance_position": { "lat": 12.9700, "lng": 77.6252 },
+  "fleet": [
+    {
+      "id": "fleet-s3-01", "lat": 12.9680, "lng": 77.6280,
+      "speed_kph": 5, "heading_deg": 310, "evading": true,
+      "reroute_status": "rerouting",
+      "route_id": "route-nh48-service-east"
+    },
+    {
+      "id": "fleet-s3-02", "lat": 12.9660, "lng": 77.6310,
+      "speed_kph": 8, "heading_deg": 308, "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-service-east"
+    },
+    {
+      "id": "fleet-s3-03", "lat": 12.9720, "lng": 77.6240,
+      "speed_kph": 3, "heading_deg": 310, "evading": true,
+      "reroute_status": "rerouting",
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s3-04", "lat": 12.9740, "lng": 77.6220,
+      "speed_kph": 6, "heading_deg": 307, "evading": true,
+      "reroute_status": "rerouting",
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s3-05", "lat": 12.9650, "lng": 77.6360,
+      "speed_kph": 4, "heading_deg": 308, "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s3-06", "lat": 12.9640, "lng": 77.6330,
+      "speed_kph": 12, "heading_deg": 130, "evading": false,
+      "route_id": "route-nh48-service-east"
+    },
+    {
+      "id": "fleet-s3-07", "lat": 12.9620, "lng": 77.6360,
+      "speed_kph": 10, "heading_deg": 130, "evading": false,
+      "route_id": "route-nh48-service-east"
+    },
+    {
+      "id": "fleet-s3-08", "lat": 12.9760, "lng": 77.6200,
+      "speed_kph": 8, "heading_deg": 307, "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s3-09", "lat": 12.9820, "lng": 77.6130,
+      "speed_kph": 15, "heading_deg": 308, "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s3-10", "lat": 12.9700, "lng": 77.6190,
+      "speed_kph": 0, "heading_deg": 90, "evading": false,
+      "route_id": "route-yeshwantpur-cross"
+    }
+  ]
+}

@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps';
+import { APIProvider, AdvancedMarker, AdvancedMarkerAnchorPoint, Map, useMap } from '@vis.gl/react-google-maps';
 import { GoogleMapsOverlay } from '@deck.gl/google-maps';
-import { IconLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { ScatterplotLayer } from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
 import type { Geometry } from 'geojson';
 
@@ -11,10 +11,12 @@ import { useCircularZoneLayer, useWarningZoneLayer } from './ExclusionPolygon';
 import { useFleetLayer } from './FleetSwarm';
 import { useHospitalLayer } from './HospitalMarkers';
 import { useRoutePathLayer } from './RoutePath';
+import DroneThreeOverlay from './DroneThreeOverlay';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
 import { useAmbulanceAnimation } from '../../hooks/useAmbulanceAnimation';
 import { useHospitalNames } from '../../hooks/useHospitalNames';
 import { useCorridorGeometry } from '../../hooks/useCorridorGeometry';
+import { useMission } from '../../lib/MissionContext';
 import type { FleetVehicle, GeoPoint, HandoffInitiatedPayload } from '../../lib/types';
 
 // ---------------------------------------------------------------------------
@@ -29,25 +31,6 @@ const EXCLUSION_RADIUS_KM = EXCLUSION_RADIUS_M / 1_000;
 // 3 km warning zone radius (metres)
 const WARNING_RADIUS_M = 3_000;
 const WARNING_RADIUS_KM = WARNING_RADIUS_M / 1_000;
-
-// Drone flight duration from ambulance stop-point to destination
-const DRONE_FLIGHT_MS = 45_000;
-
-// ---------------------------------------------------------------------------
-// Purple drone SVG (top-down 4-rotor) — used by the handoff IconLayer
-// ---------------------------------------------------------------------------
-const DRONE_ICON_URL =
-  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
-    '<line x1="14" y1="14" x2="50" y2="50" stroke="#7c3aed" stroke-width="4" stroke-linecap="round"/>' +
-    '<line x1="50" y1="14" x2="14" y2="50" stroke="#7c3aed" stroke-width="4" stroke-linecap="round"/>' +
-    '<circle cx="14" cy="14" r="8" fill="#a78bfa" stroke="#581c87" stroke-width="1.5"/>' +
-    '<circle cx="50" cy="14" r="8" fill="#a78bfa" stroke="#581c87" stroke-width="1.5"/>' +
-    '<circle cx="14" cy="50" r="8" fill="#a78bfa" stroke="#581c87" stroke-width="1.5"/>' +
-    '<circle cx="50" cy="50" r="8" fill="#a78bfa" stroke="#581c87" stroke-width="1.5"/>' +
-    '<circle cx="32" cy="32" r="9" fill="#7c3aed" stroke="#ffffff" stroke-width="2"/>' +
-    '</svg>',
-  )}`;
 
 // ---------------------------------------------------------------------------
 // Haversine distance helper (km)
@@ -112,107 +95,147 @@ function MapLegend({
   distanceText?: string;
   durationText?: string;
 }) {
-  const dsColor =
-    directionsStatus === 'live'    ? '#22c55e' :
-    directionsStatus === 'loading' ? '#fbbf24' :
-    directionsStatus === 'error'   ? '#ef4444' : '#94a3b8';
-
-  const dsLabel =
-    directionsStatus === 'live'    ? 'LIVE (DirectionsService)' :
-    directionsStatus === 'loading' ? 'FETCHING…' :
-    directionsStatus === 'error'   ? 'ERROR – pre-recorded fallback' :
-    'FALLBACK';
+  const [keyOpen, setKeyOpen] = useState(false);
 
   const routeSummary = distanceText && durationText
     ? `${distanceText} · ${durationText}`
     : distanceText || durationText || '';
 
+  const dsDot =
+    directionsStatus === 'live'    ? 'bg-green-500' :
+    directionsStatus === 'loading' ? 'bg-amber-400 animate-pulse' : 'bg-red-500';
+
+  const dsLabel =
+    directionsStatus === 'live'    ? 'Live route' :
+    directionsStatus === 'loading' ? 'Fetching…' :
+    directionsStatus === 'error'   ? 'Fallback' : 'Fallback';
+
   return (
-    <div style={{
-      position: 'absolute', top: 16, right: 16, zIndex: 10,
-      padding: '10px 16px', borderRadius: 8,
-      background: 'rgba(0,0,0,0.82)',
-      color: '#fff', fontFamily: 'monospace', fontSize: 12, lineHeight: 2,
-      minWidth: 230,
-    }}>
-      {(originName || destinationName) && (
-        <div style={{ marginBottom: 6 }}>
-          <div style={{ color: '#60a5fa', fontWeight: 700, fontSize: 10, letterSpacing: 1, marginBottom: 2 }}>
-            ACTIVE ROUTE{routeSummary ? ` · ${routeSummary}` : ''}
+    <div className="absolute top-4 right-4 z-10 font-mono text-xs min-w-[220px] max-w-[260px]">
+      <div className="bg-black/80 backdrop-blur-sm rounded-lg border border-white/10 text-white overflow-hidden shadow-xl">
+
+        {/* Route header */}
+        {(originName || destinationName) && (
+          <div className="px-3 py-2 border-b border-white/10">
+            <div className="text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-1">
+              Route{routeSummary ? ` · ${routeSummary}` : ''}
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-green-500 font-bold shrink-0">✚</span>
+              <span className="truncate text-white/90">{originName ?? 'Origin'}</span>
+            </div>
+            <div className="text-[10px] text-white/30 pl-4">↓</div>
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-red-400 font-bold shrink-0">✚</span>
+              <span className="truncate text-white/90">{destinationName ?? 'Destination'}</span>
+            </div>
           </div>
-          <div style={{ color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: '#22c55e' }}>✚</span>
-            <span style={{ maxWidth: 165, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{originName ?? 'Origin'}</span>
+        )}
+
+        {/* Live vitals */}
+        <div className="px-3 py-2 space-y-1.5">
+          {handoffActive ? (
+            <div className="flex items-center gap-2 text-violet-300 font-bold">
+              <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse shrink-0" />
+              <span>Drone active — air corridor open</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-red-400 font-semibold">◉ Exclusion zone</span>
+                <span className={`tabular-nums font-bold ${alertedCount > 0 ? 'text-red-400' : 'text-white/50'}`}>
+                  {alertedCount} veh
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-amber-400 font-semibold">◉ Warning zone</span>
+                <span className={`tabular-nums font-bold ${warningCount > 0 ? 'text-amber-400' : 'text-white/50'}`}>
+                  {warningCount} veh
+                </span>
+              </div>
+            </>
+          )}
+
+          <div className="flex items-center justify-between text-blue-400/80">
+            <span>Fleet in zones</span>
+            <span className="font-bold tabular-nums">{fleetCount}</span>
           </div>
-          <div style={{ color: '#6b7280', fontSize: 10, paddingLeft: 16 }}>↓</div>
-          <div style={{ color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: '#ef4444' }}>✚</span>
-            <span style={{ maxWidth: 165, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{destinationName ?? 'Destination'}</span>
+
+          {ambulanceSpeedKmh !== undefined && (
+            <div className="flex items-center justify-between">
+              <span className="text-white/60">Ambulance</span>
+              <span className="text-green-400 font-bold tabular-nums">{ambulanceSpeedKmh} km/h</span>
+            </div>
+          )}
+        </div>
+
+        {/* Footer: route source dot + map-key toggle */}
+        <div className="flex items-center justify-between px-3 py-1.5 border-t border-white/10 bg-white/5">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dsDot}`} />
+            <span className="text-[10px] text-white/50 uppercase tracking-wide">{dsLabel}</span>
+            {routeSource && (
+              <>
+                <span className="text-white/20">·</span>
+                <span className={`text-[10px] uppercase tracking-wide ${
+                  routeSource === 'api' || routeSource === 'cached' ? 'text-green-400/70' :
+                  routeSource === 'prerecorded' ? 'text-amber-400/70' : 'text-red-400/70'
+                }`}>
+                  {routeSource === 'api' ? 'API' : routeSource === 'cached' ? 'Cached' :
+                   routeSource === 'prerecorded' ? 'Pre-rec' : 'N/A'}
+                </span>
+              </>
+            )}
           </div>
-          <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', margin: '6px 0 2px' }} />
+          <button
+            type="button"
+            onClick={() => setKeyOpen(o => !o)}
+            className="text-[10px] text-white/40 hover:text-white/70 transition-colors uppercase tracking-wide"
+          >
+            {keyOpen ? 'Key ▲' : 'Key ▼'}
+          </button>
         </div>
-      )}
 
-      {/* Zone info — hidden during drone handoff (ground corridor is unmounted) */}
-      {!handoffActive && (
-        <>
-          <div style={{ color: '#ff4444', fontWeight: 700 }}>◉ 2 KM EXCLUSION ZONE</div>
-          <div style={{ color: '#ff8c00', fontSize: 10, marginTop: -4 }}>  Critical zone · immediate reroute required</div>
-          <div style={{ color: '#ffaa00', fontWeight: 700 }}>◉ 3 KM WARNING ZONE</div>
-          <div style={{ color: '#ffcc00', fontSize: 10, marginTop: -4 }}>  Caution zone · prepare for reroute</div>
-        </>
-      )}
-
-      {/* Fleet */}
-      <div style={{ color: '#1e78ff' }}>● FLEET IN ZONES  ({fleetCount} vehicles)</div>
-      <div style={{ color: '#ff501e', fontWeight: alertedCount > 0 ? 700 : 400 }}>
-        🔴 IN RED ZONE  ({alertedCount} critical)
+        {/* Expandable static key */}
+        {keyOpen && (
+          <div className="px-3 py-2 border-t border-white/10 space-y-1 text-[10px] text-white/70">
+            {!handoffActive && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500/80 shrink-0" />
+                  <span>2 km exclusion — reroute required</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500/80 shrink-0" />
+                  <span>3 km warning — prepare to reroute</span>
+                </div>
+              </>
+            )}
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-white/80 shrink-0" />
+              <span>Ambulance</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+              <span>Rerouting</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+              <span>Completed</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+              <span>Failed</span>
+            </div>
+            {corridorSource && corridorSource !== 'none' && (
+              <div className="flex items-center gap-2 pt-0.5 border-t border-white/10 mt-0.5">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${corridorSource === 'road-aligned' ? 'bg-green-500' : 'bg-amber-400'}`} />
+                <span>{corridorSource === 'road-aligned' ? 'Road-aligned corridor' : 'Ping-based corridor'}</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
-      <div style={{ color: '#ffaa00', fontWeight: warningCount > 0 ? 700 : 400 }}>
-        🟡 IN YELLOW ZONE  ({warningCount} warning)
-      </div>
-
-      {/* Ambulance */}
-      <div style={{ color: '#ffffff' }}>◎ AMBULANCE</div>
-      {ambulanceSpeedKmh !== undefined && (
-        <div style={{ color: '#22c55e', fontSize: 11, fontWeight: 700, marginTop: -2 }}>
-          🚑 {ambulanceSpeedKmh} km/hr
-        </div>
-      )}
-
-      {/* Drone handoff indicator */}
-      {handoffActive && (
-        <div style={{ color: '#7c3aed', fontWeight: 700 }}>🚁 DRONE HANDOFF ACTIVE — AIR CORRIDOR OPEN</div>
-      )}
-
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', margin: '4px 0' }} />
-      <div style={{ color: '#ffa500' }}>◉ REROUTING</div>
-      <div style={{ color: '#22c55e' }}>◉ COMPLETED</div>
-      <div style={{ color: '#ef4444' }}>◉ FAILED</div>
-
-      <div style={{
-        borderTop: '1px solid rgba(255,255,255,0.15)',
-        marginTop: 4, paddingTop: 4,
-        color: dsColor, fontSize: 10,
-      }}>
-        ⬤ ROUTE: {dsLabel}
-      </div>
-
-      {routeSource && (
-        <div style={{
-          color: routeSource === 'api' || routeSource === 'cached' ? '#22c55e'
-            : routeSource === 'prerecorded' ? '#fbbf24'
-            : routeSource === 'unavailable' ? '#ef4444' : '#6b7280',
-          fontSize: 10,
-        }}>
-          ⬤ PROXY: {routeSource === 'api' ? 'LIVE API' : routeSource === 'cached' ? 'CACHED' : routeSource === 'prerecorded' ? 'PRE-RECORDED' : routeSource === 'unavailable' ? 'UNAVAILABLE' : 'LOADING…'}
-        </div>
-      )}
-      {corridorSource && corridorSource !== 'none' && (
-        <div style={{ color: corridorSource === 'road-aligned' ? '#22c55e' : '#fbbf24', fontSize: 10 }}>
-          ⬤ ROUTE: {corridorSource === 'road-aligned' ? 'ROAD-ALIGNED' : 'PING-BASED'}
-        </div>
-      )}
     </div>
   );
 }
@@ -256,9 +279,17 @@ function MapScene({
   routeSource,
   corridorGeometry,
 }: MapSceneProps) {
-  const { ambulanceLat, ambulanceLng, ambulanceSpeedKph, corridorGeoJSON, handoffState, fleet: wsFleet } =
-    useSipraWebSocket(backendWsUrl);
+  const mission = useMission();
+  const currentTripId = mission.trip?.id ?? null;
+  const tripStatus = mission.trip?.status ?? null;
+  const { ambulanceLat, ambulanceLng, ambulanceSpeedKph, corridorGeoJSON, handoffState, handoffStartedAt, riskPrediction, fleet: wsFleet } =
+    useSipraWebSocket(backendWsUrl, currentTripId);
   const map = useMap();
+
+  // The WS hook now drops any payload whose trip_id doesn't match
+  // currentTripId, so handoff/risk state already belongs to this trip.
+  const handoffForCurrentTrip = handoffState;
+  const aiRecommendsDrone = riskPrediction?.recommendation === 'DISPATCH_DRONE';
   const { originName, destinationName } = useHospitalNames(
     origin,
     destination,
@@ -388,70 +419,142 @@ function MapScene({
     : (corridorGeometry ?? corridorGeoJSON) ? 'ws-based'
     : 'none';
 
-  const isHandoff = !!handoffState;
+  // ── Drone state — three-trigger activation, scoped to current trip ──────
+  // `droneActive` is the single source of truth for "should the dashboard
+  // show drone-mode". It gates ambulance, fleet, ground rings, drone marker,
+  // aura, and ETA chip. The trip status path makes it durable across reloads
+  // without needing a sticky local flag — once the backend sets
+  // status='DroneHandoff' it never reverts.
+  const droneActive =
+    handoffForCurrentTrip !== null ||
+    tripStatus === 'DroneHandoff' ||
+    aiRecommendsDrone;
 
-  // ── Ground exclusion zones — suppressed when the drone takes over ──────
-  const groundZonePos: GeoPoint | null = isHandoff ? null : ambulancePos;
+  // Real drone flight ETA from the backend (drone-dispatch mock computes it
+  // from haversine(pickup, dropoff) / cruise_kph + spin-up). Falls back to 0
+  // when handoff data isn't available — in that case the drone is rendered
+  // stationary at spawn rather than animated by a magic-number flight time.
+  const droneEtaSecondsTotal = handoffForCurrentTrip?.eta_seconds ?? 0;
+  const flightDurationMs = droneEtaSecondsTotal * 1_000;
 
+  // Drone spawn position — captured the first time droneActive flips true.
+  // Resets when the trip changes so a previous trip's drone never lingers.
+  const [droneSpawn, setDroneSpawn] = useState<GeoPoint | null>(null);
+  type DroneFrame = { lat: number; lng: number; pulse: number; bearingDeg: number; etaSec: number };
+  const droneFrameRef = useRef<DroneFrame | null>(null);
+
+  // Reset session-scoped drone state when the active trip changes — without
+  // this, switching from s3 (drone) to s1 (normal) would keep the drone
+  // marker, fit-bounds flag, and any in-flight frame around.
+  const droneFitRef = useRef(false);
+  useEffect(() => {
+    setDroneSpawn(null);
+    droneFrameRef.current = null;
+    droneFitRef.current = false;
+  }, [currentTripId]);
+
+  useEffect(() => {
+    if (droneSpawn || !droneActive) return;
+    const lat = ambulance.lat || origin?.lat || 0;
+    const lng = ambulance.lng || origin?.lng || 0;
+    if (lat === 0 && lng === 0) return; // wait for valid coords
+    setDroneSpawn({ lat, lng });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [droneActive, ambulance.lat, ambulance.lng, origin?.lat, origin?.lng]);
+
+  // Fit-bounds when drone mode activates so the entire flight path is in
+  // view. This is the catch-all that handles users who reload after the
+  // handoff (handoffState=null, but tripStatus='DroneHandoff' triggers
+  // droneActive). Fires exactly once per trip.
+  useEffect(() => {
+    if (!droneActive || droneFitRef.current) return;
+    if (!map || !droneSpawn || !destination) return;
+    droneFitRef.current = true;
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: droneSpawn.lat, lng: droneSpawn.lng });
+    bounds.extend({ lat: destination.lat, lng: destination.lng });
+    map.fitBounds(bounds, 80);
+  }, [droneActive, map, droneSpawn, destination]);
+
+  // Live camera follow: keep drone in view as it flies. The fit-bounds above
+  // frames the corridor at handoff; this pan keeps the marker centred even
+  // if the operator manually panned away or the route extends past initial
+  // bounds. Skipped while popup is initially being framed.
+  useEffect(() => {
+    if (!droneActive || !map) return;
+    const id = setInterval(() => {
+      if (!droneFrameRef.current) return;
+      const bounds = map.getBounds();
+      if (!bounds) return;
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      const { lat, lng } = droneFrameRef.current;
+      const inView =
+        lat <= ne.lat() && lat >= sw.lat() &&
+        lng <= ne.lng() && lng >= sw.lng();
+      if (!inView) map.panTo({ lat, lng });
+    }, 2_000);
+    return () => clearInterval(id);
+  }, [droneActive, map]);
+
+  // ── Ground exclusion zones — dimmed during drone mode, never removed ───
+  // The ambulance still physically holds the exclusion corridor until cargo
+  // physically transfers; operators need to see where the ground vehicle is.
   const [zoneFillLayer, zoneRingLayer] = useCircularZoneLayer(
-    groundZonePos, EXCLUSION_RADIUS_M, 1,
+    ambulancePos, EXCLUSION_RADIUS_M, droneActive ? 0.25 : 1,
   );
   const [warningFillLayer, warningRingLayer] = useWarningZoneLayer(
-    groundZonePos, WARNING_RADIUS_M, 0.8,
+    ambulancePos, WARNING_RADIUS_M, droneActive ? 0.2 : 0.8,
   );
 
-  // ── Drone flight: spawn at ambulance stop, fly straight to destination ─
-  const droneSpawnRef   = useRef<GeoPoint | null>(null);
-  const droneStartMsRef = useRef<number>(0);
+  // ── Drone position frame — updated every rAF tick ─────────────────────
+  // Animation is driven by the *real* backend ETA. Progress and remaining-
+  // seconds both derive from `handoffStartedAt` (set by the WS hook when
+  // HANDOFF_INITIATED arrives) and `eta_seconds` (computed by the drone-
+  // dispatch service from haversine distance / cruise speed). If either is
+  // missing the drone stays at spawn — no fabricated motion.
+  const [droneFrame, setDroneFrame] = useState<DroneFrame | null>(null);
 
   useEffect(() => {
-    if (isHandoff && !droneSpawnRef.current) {
-      droneSpawnRef.current = { lat: ambulance.lat, lng: ambulance.lng };
-      droneStartMsRef.current = Date.now();
-    }
-    if (!isHandoff) {
-      droneSpawnRef.current = null;
-    }
-  }, [isHandoff, ambulance.lat, ambulance.lng]);
-
-  const [droneFrame, setDroneFrame] = useState<{
-    lat: number; lng: number; pulse: number; bearingDeg: number;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!isHandoff) {
+    if (!droneSpawn) {
       setDroneFrame(null);
+      droneFrameRef.current = null;
       return;
     }
-    const dest = destination;
-    if (!dest) return;
+    const dest = destination ?? droneSpawn;
+    const bearingDeg =
+      (Math.atan2(dest.lng - droneSpawn.lng, dest.lat - droneSpawn.lat) * 180) / Math.PI;
     let rafId: number;
 
     const tick = (ts: number) => {
       const pulse = (Math.sin(ts * 0.006) + 1) / 2;
-      const spawn = droneSpawnRef.current;
-      if (spawn) {
-        const t = Math.min(1, (Date.now() - droneStartMsRef.current) / DRONE_FLIGHT_MS);
-        const lat = spawn.lat + (dest.lat - spawn.lat) * t;
-        const lng = spawn.lng + (dest.lng - spawn.lng) * t;
-        // Bearing from spawn → dest (constant for the whole flight; cheap to recompute)
-        const bearingDeg =
-          (Math.atan2(dest.lng - spawn.lng, dest.lat - spawn.lat) * 180) / Math.PI;
-        setDroneFrame({ lat, lng, pulse, bearingDeg });
+
+      let t = 0;
+      let etaSec = droneEtaSecondsTotal;
+      if (handoffStartedAt !== null && flightDurationMs > 0) {
+        const elapsedMs = Date.now() - handoffStartedAt;
+        t = Math.min(1, Math.max(0, elapsedMs / flightDurationMs));
+        etaSec = Math.max(0, droneEtaSecondsTotal - Math.floor(elapsedMs / 1_000));
       }
+
+      const lat = droneSpawn.lat + (dest.lat - droneSpawn.lat) * t;
+      const lng = droneSpawn.lng + (dest.lng - droneSpawn.lng) * t;
+      const frame: DroneFrame = { lat, lng, pulse, bearingDeg, etaSec };
+      droneFrameRef.current = frame;
+      setDroneFrame(frame);
       rafId = requestAnimationFrame(tick);
     };
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isHandoff, destination]);
+  }, [droneSpawn, destination, handoffStartedAt, flightDurationMs, droneEtaSecondsTotal]);
 
-  // Outer violet aura — pulsing disc beneath the drone for visibility.
+  // Pulsing violet aura disc (Deck.gl) beneath the Three.js drone canvas.
   const droneAuraLayer = useMemo((): ScatterplotLayer<DroneDot> | null => {
     if (!droneFrame) return null;
     const { lat, lng, pulse } = droneFrame;
-    const radius = Math.round(60 + pulse * 40);
-    const alpha  = Math.round((0.08 + pulse * 0.20) * 255);
+    const radius = Math.round(64 + pulse * 36);
+    const alpha  = Math.round((0.07 + pulse * 0.18) * 255);
     return new ScatterplotLayer<DroneDot>({
       id: 'drone-aura',
       data: [{ pos: [lng, lat] }],
@@ -464,30 +567,6 @@ function MapScene({
       filled: true,
       pickable: false,
       updateTriggers: { getRadius: radius, getFillColor: alpha },
-    });
-  }, [droneFrame]);
-
-  // Drone IconLayer — the actual drone marker, rotated toward destination.
-  const droneIconLayer = useMemo((): IconLayer<DroneDot> | null => {
-    if (!droneFrame) return null;
-    const { lat, lng, pulse, bearingDeg } = droneFrame;
-    const size = Math.round(44 + pulse * 8);
-    return new IconLayer<DroneDot>({
-      id: 'drone-icon',
-      data: [{ pos: [lng, lat] }],
-      getPosition: d => d.pos,
-      getIcon: () => ({
-        url:     DRONE_ICON_URL,
-        width:   64,
-        height:  64,
-        anchorX: 32,
-        anchorY: 32,
-      }),
-      getSize:   size,
-      getAngle:  bearingDeg,
-      sizeUnits: 'pixels',
-      pickable:  false,
-      updateTriggers: { getSize: size, getAngle: bearingDeg },
     });
   }, [droneFrame]);
 
@@ -509,21 +588,30 @@ function MapScene({
   const warningCount      = fleet.filter(v => v.inWarningZone).length;
   const totalFleetInZones = fleet.length;
 
-  // ── Ambulance marker ───────────────────────────────────────────────────
-  const ambulanceLayer = useMemo(() => new ScatterplotLayer({
-    id: 'ambulance',
-    data: [{ lat: ambulance.lat, lng: ambulance.lng }],
-    getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
-    getRadius: 14,
-    getFillColor: [255, 255, 255, 240],
-    getLineColor: [220, 0, 0, 255],
-    getLineWidth: 3,
-    lineWidthUnits: 'pixels',
-    radiusUnits: 'pixels',
-    stroked: true,
-    pickable: false,
-    transitions: { getPosition: { duration: 300 } },
-  }), [ambulance.lat, ambulance.lng]);
+  // ── Ambulance marker — dimmed during drone mode, never removed ──────────
+  // Keeps the ground vehicle visible so operators retain situational awareness
+  // of the ambulance position throughout the handoff.
+  const ambulanceLayer = useMemo(() => {
+    const fillAlpha = droneActive ? 70  : 240;
+    const lineAlpha = droneActive ? 50  : 255;
+    const radius    = droneActive ? 10  : 14;
+    const lineWidth = droneActive ? 2   : 3;
+    return new ScatterplotLayer({
+      id: 'ambulance',
+      data: [{ lat: ambulance.lat, lng: ambulance.lng }],
+      getPosition: (d: { lat: number; lng: number }) => [d.lng, d.lat],
+      getRadius: radius,
+      getFillColor: [255, 255, 255, fillAlpha],
+      getLineColor: [220, 0, 0, lineAlpha],
+      getLineWidth: lineWidth,
+      lineWidthUnits: 'pixels',
+      radiusUnits: 'pixels',
+      stroked: true,
+      pickable: false,
+      transitions: { getPosition: { duration: 300 } },
+      updateTriggers: { getFillColor: fillAlpha, getLineColor: lineAlpha, getRadius: radius },
+    });
+  }, [ambulance.lat, ambulance.lng, droneActive]);
 
   const routePathLayer = useRoutePathLayer(
     origin,
@@ -555,32 +643,72 @@ function MapScene({
         originName={originName}
         destinationName={destinationName}
         directionsStatus={directionsStatus}
-        handoffActive={isHandoff}
+        handoffActive={droneActive}
         ambulanceSpeedKmh={ambulanceSpeedKph ?? undefined}
         distanceText={distanceText}
         durationText={durationText}
       />
+      {/* Top-of-map DRONE MODE banner — fires the moment droneActive is true,
+          giving operators (and the developer debugging HMR) a visible signal
+          that the dashboard has pivoted away from ambulance/corridor mode. */}
+      {droneActive && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div className="px-4 py-2 rounded-full bg-violet-700/95 border border-violet-300/60 shadow-lg shadow-violet-500/40 backdrop-blur-sm">
+            <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-violet-50">
+              <span className="text-base leading-none">🚁</span>
+              <span>Drone Mode · Ambulance handoff complete</span>
+            </div>
+          </div>
+        </div>
+      )}
       <DeckGLOverlay
         layers={[
           // Blue PathLayer — sourced from overview_path
           routePathLayer,
-          // Ground exclusion zones — null during DRONE_HANDOFF
+          // Ground exclusion zones — dimmed during drone mode
           warningFillLayer,
           warningRingLayer,
           zoneFillLayer,
           zoneRingLayer,
-          // Fleet (only in-zone vehicles render)
-          fleetCircleLayer,
-          fleetArrowLayer,
-          // Ambulance marker
+          // Fleet — hidden during drone mode (evading logic tied to exclusion zone)
+          droneActive ? null : fleetCircleLayer,
+          droneActive ? null : fleetArrowLayer,
+          // Ambulance marker — dimmed during drone mode
           ambulanceLayer,
           // 3D hospitals + labels (rendered last so they draw on top)
           ...hospitalLayers,
-          // Drone — aura beneath, IconLayer on top (only during DRONE_HANDOFF)
+          // Violet ground-aura disc beneath the Three.js drone canvas
           droneAuraLayer,
-          droneIconLayer,
         ]}
       />
+      {/* Three.js 3D drone — rendered as a Google Maps OverlayView canvas */}
+      <DroneThreeOverlay
+        lat={droneFrame?.lat ?? 0}
+        lng={droneFrame?.lng ?? 0}
+        bearingDeg={droneFrame?.bearingDeg ?? 0}
+        active={droneActive && droneFrame !== null}
+      />
+      {/* Floating ETA countdown chip pinned next to the drone */}
+      {droneActive && droneFrame && (
+        <AdvancedMarker
+          position={{ lat: droneFrame.lat, lng: droneFrame.lng }}
+          anchorPoint={AdvancedMarkerAnchorPoint.BOTTOM_LEFT}
+        >
+          <div
+            className="ml-24 -mt-2 px-3 py-1.5 rounded-md bg-violet-950/85 border border-violet-400/60 shadow-lg backdrop-blur-sm pointer-events-none"
+            style={{ minWidth: 96 }}
+          >
+            <div className="font-mono text-[10px] uppercase tracking-widest text-violet-300/80">
+              Drone ETA
+            </div>
+            <div className="font-mono text-xl font-bold tabular-nums text-violet-100">
+              {droneFrame.etaSec >= 60
+                ? `${Math.floor(droneFrame.etaSec / 60)}m ${droneFrame.etaSec % 60}s`
+                : `${droneFrame.etaSec}s`}
+            </div>
+          </div>
+        </AdvancedMarker>
+      )}
     </>
   );
 }

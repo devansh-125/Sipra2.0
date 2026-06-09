@@ -27,8 +27,8 @@ import {
 } from 'react';
 import { getTrip } from './api';
 import { useMissionRoute } from '../hooks/useMissionRoute';
-import { useSipraWebSocket } from '../hooks/useSipraWebSocket';
 import { useCorridorGeometry } from '../hooks/useCorridorGeometry';
+import { useSipraWebSocket } from '../hooks/useSipraWebSocket';
 import type { GeoPoint, Trip, TripStatus } from './types';
 import type { RouteSource } from './routing';
 
@@ -119,24 +119,63 @@ export function MissionProvider({ children, tripId }: MissionProviderProps) {
   const [remainingMs, setRemaining] = useState(0);
   const [elapsedMs, setElapsed]     = useState(0);
 
-  // ── Load trip ───────────────────────────────────────────────────────────
+  // The WS singleton outlives client-side route changes, so its trip-tied
+  // state (handoff banner, corridor polygon, risk prediction, completion
+  // summary) carries from scenario to scenario unless we explicitly clear
+  // it. Reset every time the URL trip changes so s1 → s2 starts fresh.
+  const { resetForTrip } = useSipraWebSocket();
+  useEffect(() => {
+    resetForTrip();
+    setTrip(null);
+  }, [tripId, resetForTrip]);
+
+  // ── Load trip + poll status until terminal ─────────────────────────────
+  // The backend Risk Monitor transitions trips InTransit → DroneHandoff
+  // asynchronously while the dashboard is open. Without a refresh, the
+  // dashboard's `trip.status` would stay frozen at whatever was loaded on
+  // mount, and downstream consumers (CorridorMap, AIBrainPanel) wouldn't
+  // know to switch to drone-mode. So we poll every 5 s while the trip is
+  // still in a transient state, and stop once it reaches a terminal one.
   useEffect(() => {
     if (!tripId) {
-      setTripError('No trip ID provided');
+      setTripError('Click Run Scenario to start a trip');
       setLoading(false);
       return;
     }
+
     let cancelled = false;
-    setLoading(true);
-    getTrip(tripId)
-      .then(t => { if (!cancelled) { setTrip(t); setLoading(false); } })
-      .catch((e: unknown) => {
-        if (!cancelled) {
-          setTripError(e instanceof Error ? e.message : 'Failed to load trip');
-          setLoading(false);
-        }
-      });
-    return () => { cancelled = true; };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const fetchOnce = (isInitial: boolean) => {
+      if (cancelled) return;
+      if (isInitial) setLoading(true);
+      getTrip(tripId)
+        .then(t => {
+          if (cancelled) return;
+          setTrip(t);
+          if (isInitial) setLoading(false);
+          const terminal = t.status === 'Completed' || t.status === 'Failed';
+          if (!terminal) {
+            timer = setTimeout(() => fetchOnce(false), 5_000);
+          }
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          if (isInitial) {
+            setTripError(e instanceof Error ? e.message : 'Failed to load trip');
+            setLoading(false);
+          }
+          // Even on transient error, keep polling so the panel recovers.
+          timer = setTimeout(() => fetchOnce(false), 5_000);
+        });
+    };
+
+    fetchOnce(true);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [tripId]);
 
   // ── Golden-hour countdown ────────────────────────────────────────────────

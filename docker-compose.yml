@@ -12,7 +12,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/docker/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
-      - ./infra/docker/postgres/seed.sql:/docker-entrypoint-initdb.d/01-seed.sql:ro
+      - ./services/core-go/internal/store/postgres/migrations/001_init.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./infra/docker/postgres/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sipra} -d ${POSTGRES_DB:-sipra}"]
       interval: 5s
@@ -52,7 +53,7 @@ services:
       AI_BRAIN_URL: http://ai-brain:8000
       MOCK_DRONE_URL: http://drone-dispatch:4003
       VALHALLA_URL: http://valhalla:8002
-      CHAOS_ENABLED: "true"
+      CHAOS_ENABLED: "false"
       LOG_LEVEL: info
     depends_on:
       postgres:
@@ -66,16 +67,25 @@ services:
     build:
       context: ./services/web
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
-        NEXT_PUBLIC_BACKEND_WS_URL: ws://localhost:8080/ws/dashboard
-        NEXT_PUBLIC_BACKEND_HTTP_URL: http://localhost:8080
-        NEXT_PUBLIC_SIM_WS_URL: ws://localhost:4001
-        NEXT_PUBLIC_CHAOS_ENABLED: "true"
+      target: dev
     container_name: sipra-web
     restart: unless-stopped
+    environment:
+      BACKEND_INTERNAL_URL: http://core-go:8080
+      NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
+      NEXT_PUBLIC_BACKEND_WS_URL: ws://localhost:8080/ws/dashboard
+      NEXT_PUBLIC_BACKEND_HTTP_URL: http://localhost:8080
+      NEXT_PUBLIC_SIM_WS_URL: ws://localhost:4001
+      NEXT_PUBLIC_CHAOS_ENABLED: "false"
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "3000:3000"
+    volumes:
+      - ./services/web:/app
+      - /app/node_modules
+      - /app/.next
+      - ./datasets:/app/datasets:ro
     depends_on:
       - core-go
     networks:
@@ -89,6 +99,16 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    environment:
+      # Demo profile: ai-brain is reachable only on the docker network, never
+      # exposed to the public internet, so HMAC/JWT/api-key auth is overkill
+      # for hackathon runs. Re-enable for any non-demo deployment.
+      AI_AUTH_REQUIRED: "false"
+      DATABASE_URL: postgres://sipra:sipra_dev@postgres:5432/sipra?sslmode=disable
+      # Google Routes API v2 — TRAFFIC_AWARE_OPTIMAL ETA backbone.
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      # Live weather lookup at the ambulance position (FHWA-mapped multipliers).
+      OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy

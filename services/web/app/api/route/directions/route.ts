@@ -76,11 +76,21 @@ export async function GET(request: NextRequest) {
     };
 
     if (data.status !== 'OK' || !data.routes?.length) {
-      console.error('[directions-proxy] Google status:', data.status, '|', data.error_message ?? '(no message)');
-      return NextResponse.json(
-        { error: data.error_message ?? `Directions API status: ${data.status}` },
-        { status: 502 },
+      // The most common failure on a hackathon-grade Google Maps key is
+      // REQUEST_DENIED with "API keys with referer restrictions cannot be
+      // used with this API." That's expected — the dashboard already
+      // succeeds via the client-side DirectionsService, and lib/routing.ts
+      // falls back to a pre-recorded polyline when the proxy doesn't
+      // respond. Returning 204 keeps the fallback chain quiet (no console
+      // error, no Network panel red row) while preserving the proxy for
+      // any future server-only key.
+      console.warn(
+        '[directions-proxy] Google',
+        data.status,
+        '— falling back. Message:',
+        data.error_message ?? '(none)',
       );
+      return new NextResponse(null, { status: 204 });
     }
 
     // Map all routes to a uniform shape

@@ -1,0 +1,48 @@
+{
+  "snapshot_at_seconds_into_trip": 300,
+  "ambulance_position": { "lat": 13.0000, "lng": 77.5950 },
+  "fleet": [
+    {
+      "id": "fleet-s1-01", "lat": 13.0120, "lng": 77.5720,
+      "speed_kph": 72, "heading_deg": 305, "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s1-02", "lat": 13.0200, "lng": 77.5610,
+      "speed_kph": 75, "heading_deg": 307, "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s1-03", "lat": 13.0360, "lng": 77.5390,
+      "speed_kph": 78, "heading_deg": 308, "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s1-04", "lat": 12.9880, "lng": 77.6050,
+      "speed_kph": 62, "heading_deg": 307, "evading": true,
+      "reroute_status": "rerouting",
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s1-05", "lat": 12.9800, "lng": 77.6155,
+      "speed_kph": 58, "heading_deg": 310, "evading": true,
+      "reroute_status": "completed",
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s1-06", "lat": 13.0060, "lng": 77.5960,
+      "speed_kph": 42, "heading_deg": 125, "evading": false,
+      "route_id": "route-nh48-service-east"
+    },
+    {
+      "id": "fleet-s1-07", "lat": 13.0030, "lng": 77.5920,
+      "speed_kph": 38, "heading_deg": 300, "evading": false,
+      "route_id": "route-nh48-service-west"
+    },
+    {
+      "id": "fleet-s1-08", "lat": 12.9940, "lng": 77.5995,
+      "speed_kph": 28, "heading_deg": 30, "evading": false,
+      "route_id": "route-nh48-cross-local"
+    }
+  ]
+}

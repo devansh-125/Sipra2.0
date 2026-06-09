@@ -12,9 +12,10 @@ Complete guide to testing the Sipra system with dummy data and dynamic test scen
 
 | Script | Purpose | Status |
 |--------|---------|--------|
-| `scripts/simulate-gps.ts` | God-mode simulator with 20 fleet vehicles on real Bangalore roads | ✅ **EXCELLENT** |
+| `test-tools/simulate-gps.ts` | God-mode simulator with 20 fleet vehicles on real Bangalore roads | ✅ **EXCELLENT** |
 | `scripts/realtime-ingest.ts` | Streams pre-recorded GPS pings from NDJSON file | ✅ **USEFUL** |
-| `scripts/e2e-handoff.ts` | End-to-end test for drone handoff pipeline | ✅ **COMPREHENSIVE** |
+| `test-tools/e2e-handoff.ts` | End-to-end test for drone handoff pipeline | ✅ **COMPREHENSIVE** |
+| `scripts/play-scenario.ts` | Replays the three fixed scenario datasets (s1/s2/s3) | ✅ **PRIMARY** |
 
 **How to use:**
 ```bash
@@ -29,29 +30,28 @@ npm run realtime:ingest
 
 # Run e2e handoff test
 npm run e2e:handoff
+
+# Replay recorded scenarios (real data)
+npm run play:s1-normal
+npm run play:s2-congestion
+npm run play:s3-drone-handoff
 ```
 
-#### 2. **Chaos Testing Endpoints** (Stress Testing)
+#### 2. **Recorded Scenario Datasets (Primary)**
 
-| Endpoint | Purpose | Example |
-|----------|---------|---------|
-| `POST /api/v1/chaos/flood-bridge` | Inject GPS pings to simulate traffic jam | `{"trip_id": "...", "count": 50}` |
-| `POST /api/v1/chaos/spawn-fleet` | Spawn synthetic fleet vehicles | `{"count": 100, "center_lat": 12.96, "center_lng": 77.57, "radius_m": 5000}` |
-| `POST /api/v1/chaos/force-handoff` | Bypass AI and force drone handoff | `{"trip_id": "...", "reason": "Manual test"}` |
-| `POST /api/v1/chaos/reset` | Clear all chaos state | `{}` |
+Three fixed, real-data scenarios live under `datasets/test-scenarios/realtime/`:
 
-**How to use:**
+- `s1-normal` — baseline highway run
+- `s2-congestion` — mixed-speed congestion wave
+- `s3-drone-handoff` — stall event intended to trigger drone dispatch
+
+Run them with the scenario player:
+
 ```bash
-# Flood bridge (PowerShell)
-.\scripts\chaos-flood-bridge.ps1
-
-# Flood bridge (Bash)
-bash scripts/chaos-flood-bridge.sh
-
-# Or use curl
-curl -X POST http://localhost:8080/api/v1/chaos/spawn-fleet \
-  -H "Content-Type: application/json" \
-  -d '{"count": 50, "center_lat": 12.9656, "center_lng": 77.5713, "radius_m": 3000}'
+cd scripts
+npm run play:s1-normal
+npm run play:s2-congestion
+npm run play:s3-drone-handoff
 ```
 
 #### 3. **Existing Test Data**
@@ -63,65 +63,6 @@ curl -X POST http://localhost:8080/api/v1/chaos/spawn-fleet \
 | `datasets/realtime/ai-predict.sample.*.json` | AI brain API contract examples | ⚠️ Reference only |
 | `datasets/realtime/drone-dispatch.sample.*.json` | Drone API contract examples | ⚠️ Reference only |
 
----
-
-## ❌ **WHAT'S MISSING** (Created in this session)
-
-### 1. **UI Test Panel** ✨ NEW
-
-**Current status:** Removed. Use `services/web/components/chaos/ChaosPanel.tsx` plus the scenario scripts instead.
-
-**Features:**
-- ✅ One-click test scenario triggers
-- ✅ Organized by category (Trip, Corridor, Bounty, Handoff, Chaos)
-- ✅ Real-time result feedback
-- ✅ No need to write curl commands or scripts
-
-**Test Scenarios Available:**
-
-#### Trip Creation Tests
-- 🚑 **Normal Trip** - 60 min golden hour (should NOT breach)
-- ⚡ **Urgent Trip** - 10 min golden hour (high breach risk)
-- 🔴 **Critical Trip** - 2 min golden hour (WILL breach)
-
-#### Corridor Tests
-- 🟢 **Small Corridor** - 500m buffer (tight zone)
-- 🔴 **Large Corridor** - 3000m buffer (wide zone)
-
-#### Bounty Tests
-- 💰 **Low Bounty** - 100 points base
-- 💎 **High Bounty** - 500 points base
-- ⏰ **Expired Bounty** - Expires in 5 seconds
-
-#### Handoff Tests
-- 🚁 **Force Handoff** - Bypass AI, trigger immediately
-
-#### Chaos Tests
-- 🌊 **Flood Bridge** - Inject 50 pings (traffic jam)
-- 🚗 **Spawn 10 Vehicles** - Light fleet density
-- 🚙 **Spawn 100 Vehicles** - Stress test
-- 🔄 **Reset Chaos** - Clear all chaos state
-
-**How to use:**
-1. Open the dashboard.
-2. Use the Chaos panel for live fault injection.
-3. Use `scripts/play-scenario.ts` for repeatable dataset replays.
-
-### 2. **Comprehensive Test Data** ✨ NEW
-
-**Location:** `datasets/test-scenarios/`
-
-#### Trip Scenarios
-- `trips/normal.json` - Standard 60-min delivery
-- `trips/critical.json` - 2-min guaranteed breach (50km away)
-- `trips/multiple-simultaneous.json` - 5 trips at once
-
-#### Future Test Data (Recommended to Create)
-- `pings/smooth-route.ndjson` - Clean 40 kph drive
-- `pings/traffic-jam.ndjson` - Slow 15 kph crawl
-- `pings/erratic.ndjson` - Speed varies 10-80 kph
-- `bounties/standard.json` - Normal bounty offer
-- `bounties/high-surge.json` - Maximum surge pricing
 
 ---
 
@@ -146,11 +87,13 @@ curl -X POST http://localhost:8080/api/v1/chaos/spawn-fleet \
    - See automatic bounty lifecycle
    - Observe corridor updates in real-time
 
-3. **Use UI Test Panel:**
-   - Navigate to Admin → Test Panel
-   - Click "Critical Trip" to force a breach
-   - Click "Spawn 100 Vehicles" for stress test
-   - Click "Force Handoff" to test drone dispatch
+3. **Replay recorded scenarios:**
+   ```bash
+   cd scripts
+   npm run play:s1-normal
+   npm run play:s2-congestion
+   npm run play:s3-drone-handoff
+   ```
 
 ### For QA Testing
 
@@ -164,62 +107,47 @@ curl -X POST http://localhost:8080/api/v1/chaos/spawn-fleet \
    ✅ All assertions passed — Phase 5 handoff pipeline is working end-to-end.
    ```
 
-2. **Test specific scenarios:**
+2. **Replay the recorded scenarios:**
    ```bash
-   # Test critical trip
-   SCENARIO=critical npm run test:scenario
-   
-   # Test multiple simultaneous trips
-   SCENARIO=multiple npm run test:scenario
-   ```
-
-3. **Chaos testing:**
-   ```bash
-   # Flood bridge
-   bash scripts/chaos-flood-bridge.sh
-   
-   # Spawn massive fleet
-   curl -X POST http://localhost:8080/api/v1/chaos/spawn-fleet \
-     -H "Content-Type: application/json" \
-     -d '{"count": 200, "center_lat": 12.9656, "center_lng": 77.5713, "radius_m": 5000}'
+   cd scripts
+   npm run play:s1-normal
+   npm run play:s2-congestion
+   npm run play:s3-drone-handoff
    ```
 
 ### For Demo/Presentation
 
-1. **Start with clean state:**
-   ```bash
-   curl -X POST http://localhost:8080/api/v1/chaos/reset
-   ```
-
-2. **Run god-mode simulator:**
+1. **Run god-mode simulator:**
    ```bash
    cd scripts && npm run simulate
    ```
 
-3. **Show specific scenarios via UI:**
-   - Open Test Panel
-   - Click "Critical Trip" → Watch handoff trigger
-   - Click "Spawn 100 Vehicles" → Show fleet rerouting
-   - Click "Flood Bridge" → Demonstrate traffic handling
+2. **Show recorded scenarios in order:**
+   ```bash
+   cd scripts
+   npm run play:s1-normal
+   npm run play:s2-congestion
+   npm run play:s3-drone-handoff
+   ```
 
 ---
 
 ## 📋 **TEST COVERAGE MATRIX**
 
-| Feature | Manual Test | Script Test | E2E Test | UI Test | Status |
-|---------|-------------|-------------|----------|---------|--------|
+| Feature | Manual Test | Script Test | E2E Test | Scenario Replay | Status |
+|---------|-------------|-------------|----------|-----------------|--------|
 | Trip creation | ✅ | ✅ | ✅ | ✅ | **Complete** |
-| GPS ping ingestion | ✅ | ✅ | ✅ | ❌ | **Good** |
-| Corridor calculation | ✅ | ✅ | ❌ | ❌ | **Needs E2E** |
-| AI breach prediction | ✅ | ✅ | ✅ | ❌ | **Good** |
+| GPS ping ingestion | ✅ | ✅ | ✅ | ✅ | **Good** |
+| Corridor calculation | ✅ | ✅ | ❌ | ✅ | **Needs E2E** |
+| AI breach prediction | ✅ | ✅ | ✅ | ✅ | **Good** |
 | Drone handoff | ✅ | ✅ | ✅ | ✅ | **Complete** |
-| Bounty creation | ✅ | ✅ | ❌ | ✅ | **Needs E2E** |
+| Bounty creation | ✅ | ✅ | ❌ | ❌ | **Needs E2E** |
 | Bounty claim | ✅ | ✅ | ❌ | ❌ | **Needs Tests** |
 | Bounty verification | ✅ | ✅ | ❌ | ❌ | **Needs Tests** |
 | Fleet rerouting | ✅ | ✅ | ❌ | ❌ | **Needs E2E** |
-| WebSocket broadcast | ✅ | ✅ | ✅ | ❌ | **Good** |
+| WebSocket broadcast | ✅ | ✅ | ✅ | ✅ | **Good** |
 | Webhook dispatch | ✅ | ❌ | ❌ | ❌ | **Needs Tests** |
-| Multiple simultaneous trips | ❌ | ❌ | ❌ | ✅ | **Needs Implementation** |
+| Multiple simultaneous trips | ❌ | ❌ | ❌ | ❌ | **Needs Implementation** |
 | Edge cases (invalid GPS, etc.) | ❌ | ❌ | ❌ | ❌ | **Missing** |
 
 ---
@@ -284,16 +212,11 @@ curl -X POST http://localhost:8080/api/v1/chaos/spawn-fleet \
 - Check AI brain is running: `docker compose ps ai-brain`
 - Check trip has tight deadline (< 10 min)
 - Check ambulance is far from destination (> 20 km)
-- Force handoff via UI Test Panel
 
 **Bounties not appearing:**
 - Check fleet vehicles are in red zone (< 2 km from ambulance)
 - Check corridor is being calculated (check logs)
 - Check webhook partners are active in database
-
-**Chaos endpoints return 403:**
-- Set `CHAOS_ENABLED=true` in backend environment
-- Restart Go server
 
 ---
 
@@ -312,9 +235,7 @@ curl -X POST http://localhost:8080/api/v1/chaos/spawn-fleet \
 
 ✅ **God-mode simulator** - Best for development and demos  
 ✅ **E2E handoff test** - Validates critical path  
-✅ **Chaos endpoints** - Stress testing  
-✅ **UI Test Panel** - One-click scenario triggers  
-✅ **Comprehensive test data** - Multiple trip scenarios  
+✅ **Recorded scenarios** - s1/s2/s3 real dataset replays  
 
 ### What's Still Missing
 
@@ -344,5 +265,5 @@ cd scripts && npm run simulate
 
 **For comprehensive testing:**
 1. Run e2e tests: `npm run e2e:handoff`
-2. Try chaos scenarios via the dashboard Chaos panel
+2. Replay recorded scenarios: `npm run play:s1-normal`, `npm run play:s2-congestion`, `npm run play:s3-drone-handoff`
 3. Create additional test data as needed

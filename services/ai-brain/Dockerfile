@@ -8,10 +8,12 @@ RUN pip install --no-cache-dir \
     "uvicorn[standard]>=0.29.0" \
     "httpx>=0.27.0" \
     "pydantic>=2.7.0" \
-    "asyncpg>=0.29.0"
+    "python-dotenv>=1.0.0" \
+    "asyncpg>=0.29.0" \
+    "cryptography>=42.0.0"
 
 COPY app/ ./app/
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

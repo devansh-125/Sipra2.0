@@ -10,6 +10,20 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// recentSpeedsLimit is how many recent pings the monitor reads to build
+// the AI brain's recent_speeds_kph[] residual signal. Five matches the
+// Highway Capacity Manual rolling window used in the AI brain.
+const recentSpeedsLimit = 5
+
+// fleetCorridorRadiusMeters is the 2 km exclusion-corridor radius the
+// dashboard renders. The AI brain weighs density inside that same radius.
+const fleetCorridorRadiusMeters = 2_000.0
+
+// defaultSpeedKPH is used when no recent ping carries speed telemetry.
+// Conservative urban-arterial midpoint; the AI brain's bounded residual
+// keeps a single bad fallback from dominating the prediction.
+const defaultSpeedKPH = 40.0
+
 // TripStore is the subset of TripRepo the Monitor needs.
 type TripStore interface {
 	ListInTransit(ctx context.Context) ([]domain.Trip, error)
@@ -19,27 +33,40 @@ type TripStore interface {
 // PingStore is the subset of PingRepo the Monitor needs.
 type PingStore interface {
 	GetLatest(ctx context.Context, tripID domain.TripID) (*domain.GPSPing, error)
+	GetRecent(ctx context.Context, tripID domain.TripID, limit int) ([]domain.GPSPing, error)
+}
+
+// FleetDensity is the live corridor-density signal the AI brain uses.
+// *redisstore.FleetGeoStore satisfies this; tests inject a fake.
+type FleetDensity interface {
+	CountInRadius(ctx context.Context, lat, lng float64, radiusMeters float64) (int, error)
 }
 
 // Monitor polls Postgres for InTransit trips, calls the AI brain, and
-// transitions breaching trips to DroneHandoff.
+// reacts to the recommendation enum: DISPATCH_DRONE transitions the trip
+// and dispatches a drone; REQUEST_BOUNTY_BOOST emits a WS signal so the
+// bounty engine (Phase 6) can raise the surge; CONTINUE is a no-op.
 type Monitor struct {
 	trips      TripStore
 	pings      PingStore
 	predictor  Predictor
 	dispatcher DroneDispatcher
+	density    FleetDensity
 	hub        *ws.Hub
 	interval   time.Duration
 }
 
 // NewMonitor wires the Monitor with its dependencies.
 // Both *pgstore.TripRepo and *pgstore.PingRepo satisfy the store interfaces.
-func NewMonitor(trips TripStore, pings PingStore, p Predictor, hub *ws.Hub, dispatcher DroneDispatcher, interval time.Duration) *Monitor {
+// density may be nil if no fleet GEO source is wired yet — in that case the
+// monitor sends fleet_density_in_corridor=0 so the AI brain still works.
+func NewMonitor(trips TripStore, pings PingStore, p Predictor, hub *ws.Hub, dispatcher DroneDispatcher, density FleetDensity, interval time.Duration) *Monitor {
 	return &Monitor{
 		trips:      trips,
 		pings:      pings,
 		predictor:  p,
 		dispatcher: dispatcher,
+		density:    density,
 		hub:        hub,
 		interval:   interval,
 	}
@@ -82,65 +109,118 @@ func (m *Monitor) EvaluateOnce(ctx context.Context) {
 	}
 }
 
-// defaultSpeedKPH is used when the latest ping carries no speed telemetry.
-const defaultSpeedKPH = 40.0
-
 func (m *Monitor) evaluateTrip(ctx context.Context, trip domain.Trip) {
-	ping, err := m.pings.GetLatest(ctx, trip.ID)
-	if err != nil {
-		log.Warn().Err(err).Str("trip", string(trip.ID)).Msg("risk: no latest ping, skipping trip")
+	pings, err := m.pings.GetRecent(ctx, trip.ID, recentSpeedsLimit)
+	if err != nil || len(pings) == 0 {
+		log.Warn().Err(err).Str("trip", string(trip.ID)).Msg("risk: no recent pings, skipping trip")
 		return
 	}
 
-	speedKPH := defaultSpeedKPH
-	if ping.SpeedKPH != nil && *ping.SpeedKPH > 0 {
-		speedKPH = *ping.SpeedKPH
+	// Latest ping = newest (GetRecent returns DESC).
+	latest := pings[0]
+
+	speeds := make([]float64, 0, len(pings))
+	for _, p := range pings {
+		if p.SpeedKPH != nil && *p.SpeedKPH >= 0 {
+			speeds = append(speeds, *p.SpeedKPH)
+		}
+	}
+	if len(speeds) == 0 {
+		speeds = []float64{defaultSpeedKPH}
+	}
+
+	density := 0
+	if m.density != nil {
+		if n, derr := m.density.CountInRadius(ctx, latest.Location.Lat, latest.Location.Lng, fleetCorridorRadiusMeters); derr != nil {
+			log.Warn().Err(derr).Str("trip", string(trip.ID)).Msg("risk: fleet density lookup failed, defaulting to 0")
+		} else {
+			density = n
+		}
+	}
+
+	now := time.Now().UTC()
+	deadlineRemaining := int(trip.GoldenHourDeadline.Sub(now).Seconds())
+	if deadlineRemaining < 0 {
+		deadlineRemaining = 0
 	}
 
 	predCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	resp, err := m.predictor.Predict(predCtx, PredictRequest{
-		TripID:             string(trip.ID),
-		CurrentLat:         ping.Location.Lat,
-		CurrentLng:         ping.Location.Lng,
-		DestinationLat:     trip.Destination.Lat,
-		DestinationLng:     trip.Destination.Lng,
-		GoldenHourDeadline: trip.GoldenHourDeadline,
-		AvgSpeedKPH:        speedKPH,
+	resp, err := m.predictor.Decide(predCtx, DecideRequest{
+		PredictRequest: PredictRequest{
+			TripID:                   string(trip.ID),
+			CurrentPosition:          Position{Lat: latest.Location.Lat, Lng: latest.Location.Lng},
+			Destination:              Position{Lat: trip.Destination.Lat, Lng: trip.Destination.Lng},
+			DeadlineSecondsRemaining: deadlineRemaining,
+			RecentSpeedsKPH:          speeds,
+			FleetDensityInCorridor:   density,
+		},
+		// CorridorActive is always true once we have a recent corridor row.
+		// Phase 6 will wire the real corridor state; false is safe for now
+		// because rule R3 (ACTIVATE_CORRIDOR) only fires when it's false.
+		CorridorActive: true,
 	})
 	if err != nil {
-		log.Warn().Err(err).Str("trip", string(trip.ID)).Msg("risk: predict call failed, skipping trip")
+		log.Warn().Err(err).Str("trip", string(trip.ID)).Msg("risk: decide call failed, skipping trip")
 		return
 	}
 
+	pred := resp.Prediction
+
 	log.Debug().
 		Str("trip", string(trip.ID)).
-		Bool("will_breach", resp.WillBreach).
-		Float64("breach_prob", resp.BreachProbability).
-		Str("reasoning", resp.Reasoning).
-		Msg("risk: prediction received")
+		Str("action", string(resp.Decision.Action)).
+		Strs("rule_path", resp.Decision.RulePath).
+		Float64("breach_prob", pred.BreachProbability).
+		Int("density", density).
+		Msg("risk: decision received")
 
 	// Broadcast every prediction so the dashboard AI Brain panel stays live.
 	m.hub.BroadcastRiskPrediction(ws.RiskPredictionPayload{
 		TripID:                   string(trip.ID),
-		PredictedETASeconds:      resp.PredictedETASeconds,
-		DeadlineSecondsRemaining: resp.DeadlineSecondsRemaining,
-		BreachProbability:        resp.BreachProbability,
-		WillBreach:               resp.WillBreach,
-		WeatherCondition:         resp.WeatherCondition,
-		WeatherFactor:            resp.WeatherFactor,
-		Reasoning:                resp.Reasoning,
-		AIConfidence:             resp.AIConfidence,
-		AIReasoning:              resp.AIReasoning,
-		RiskFactors:              resp.RiskFactors,
-		Recommendations:          resp.Recommendations,
+		PredictedETASeconds:      pred.PredictedETASeconds,
+		DeadlineSecondsRemaining: pred.DeadlineSecondsRemaining,
+		BreachProbability:        pred.BreachProbability,
+		WillBreach:               pred.WillBreach,
+		Recommendation:           string(resp.Decision.Action),
+		WeatherCondition:         pred.WeatherCondition,
+		WeatherFactor:            pred.WeatherFactor,
+		FleetDensityInCorridor:   pred.FleetDensityInCorridor,
+		FleetPenalty:             pred.FleetPenalty,
+		EffectiveSpeedKPH:        pred.EffectiveSpeedKPH,
+		AIConfidence:             pred.AIConfidence,
+		Reasoning:                pred.Reasoning,
 	})
 
-	if !resp.WillBreach {
-		return
+	switch resp.Decision.Action {
+	case DecisionActionDispatchDrone:
+		m.handleDispatchDrone(ctx, trip, latest, resp)
+	case DecisionActionRequestBountyBoost:
+		m.hub.BroadcastBountyBoostRequested(string(trip.ID), pred.BreachProbability, pred.Reasoning)
+		log.Info().
+			Str("trip", string(trip.ID)).
+			Float64("breach_prob", pred.BreachProbability).
+			Msg("risk: bounty boost requested")
+	case DecisionActionContinue:
+		// no-op
+	case DecisionActionAbort:
+		log.Warn().
+			Str("trip", string(trip.ID)).
+			Strs("rule_path", resp.Decision.RulePath).
+			Msg("risk: ABORT decision — route deviation + no-progress detected")
+	case DecisionActionActivateCorridor, DecisionActionReroute:
+		log.Info().
+			Str("trip", string(trip.ID)).
+			Str("action", string(resp.Decision.Action)).
+			Msg("risk: corridor/reroute action — handled by corridor engine")
+	default:
+		log.Warn().Str("trip", string(trip.ID)).Str("action", string(resp.Decision.Action)).Msg("risk: unknown action")
 	}
+}
 
+func (m *Monitor) handleDispatchDrone(ctx context.Context, trip domain.Trip, latest domain.GPSPing, resp *DecideResponse) {
+	pred := resp.Prediction
 	now := time.Now().UTC()
 	if err := trip.TransitionTo(domain.TripStatusDroneHandoff, now); err != nil {
 		// ErrInvalidTransition means the trip already left InTransit — not an error.
@@ -153,31 +233,79 @@ func (m *Monitor) evaluateTrip(ctx context.Context, trip domain.Trip) {
 		return
 	}
 
-	metrics.HandoffsTriggered.WithLabelValues(resp.Reasoning).Inc()
+	metrics.HandoffsTriggered.WithLabelValues(pred.Reasoning).Inc()
 
 	log.Info().
 		Str("trip", string(trip.ID)).
-		Int("predicted_eta_s", resp.PredictedETASeconds).
-		Str("reason", resp.Reasoning).
+		Int("predicted_eta_s", pred.PredictedETASeconds).
+		Float64("breach_prob", pred.BreachProbability).
+		Strs("rule_path", resp.Decision.RulePath).
 		Msg("risk: trip transitioned to DroneHandoff")
+
+	// Ask the AI brain for weather-adjusted cruise/altitude/ETA before
+	// calling the partner dispatcher. This keeps every dynamic flight
+	// parameter (other than identity/inventory) inside the AI brain
+	// instead of hardcoded in the dispatcher mock.
+	var aiFlight *AIPredictedFlight
+	flightCtx, flightCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer flightCancel()
+	dronePred, perr := m.predictor.PredictDrone(flightCtx, DronePredictRequest{
+		TripID:           string(trip.ID),
+		Pickup:           Position{Lat: latest.Location.Lat, Lng: latest.Location.Lng},
+		Dropoff:          Position{Lat: trip.Destination.Lat, Lng: trip.Destination.Lng},
+		WeatherCondition: pred.WeatherCondition,
+		UrgencyTier:      "Critical",
+	})
+	if perr != nil {
+		log.Warn().Err(perr).Str("trip", string(trip.ID)).Msg("risk: /predict-drone failed, dispatcher will use mock defaults")
+	} else {
+		aiFlight = &AIPredictedFlight{
+			CruiseKPH:        dronePred.CruiseKPH,
+			AltitudeMCruise:  dronePred.AltitudeMCruise,
+			SpinUpSeconds:    dronePred.SpinUpSeconds,
+			ETASeconds:       dronePred.ETASeconds,
+			RouteKM:          dronePred.RouteKM,
+			WeatherCondition: dronePred.WeatherCondition,
+		}
+		log.Info().
+			Str("trip", string(trip.ID)).
+			Float64("cruise_kph", dronePred.CruiseKPH).
+			Int("alt_m", dronePred.AltitudeMCruise).
+			Int("eta_s", dronePred.ETASeconds).
+			Str("weather", dronePred.WeatherCondition).
+			Msg("risk: AI brain drone flight prediction")
+	}
 
 	// Call the drone dispatch API; degrade gracefully on failure.
 	droneID, droneETA := "", 0
+	var meta *ws.DroneMetadata
 	dispCtx, dispCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer dispCancel()
 
 	dr, err := m.dispatcher.Dispatch(dispCtx, DispatchRequest{
-		TripID:    string(trip.ID),
-		Pickup:    LatLng{Lat: ping.Location.Lat, Lng: ping.Location.Lng},
-		Dropoff:   LatLng{Lat: trip.Destination.Lat, Lng: trip.Destination.Lng},
-		CargoType: string(trip.Cargo.Category),
-		Priority:  "CRITICAL",
+		TripID:      string(trip.ID),
+		Pickup:      LatLng{Lat: latest.Location.Lat, Lng: latest.Location.Lng},
+		Dropoff:     LatLng{Lat: trip.Destination.Lat, Lng: trip.Destination.Lng},
+		CargoType:   string(trip.Cargo.Category),
+		Priority:    "CRITICAL",
+		AIPredicted: aiFlight,
 	})
 	if err != nil {
 		log.Warn().Err(err).Str("trip", string(trip.ID)).Msg("risk: drone dispatch call failed, broadcasting without drone info")
 	} else {
 		droneID = dr.DroneID
 		droneETA = dr.ETASeconds
+		if dr.DroneMetadata != nil {
+			meta = &ws.DroneMetadata{
+				Model:           dr.DroneMetadata.Model,
+				MaxPayloadKG:    dr.DroneMetadata.MaxPayloadKG,
+				BatteryPct:      dr.DroneMetadata.BatteryPct,
+				LaunchPadID:     dr.DroneMetadata.LaunchPadID,
+				AltitudeMCruise: dr.DroneMetadata.AltitudeMCruise,
+				CruiseKPH:       dr.DroneMetadata.CruiseKPH,
+				RouteKM:         dr.DroneMetadata.RouteKM,
+			}
+		}
 		log.Info().
 			Str("trip", string(trip.ID)).
 			Str("drone", droneID).
@@ -185,5 +313,5 @@ func (m *Monitor) evaluateTrip(ctx context.Context, trip domain.Trip) {
 			Msg("risk: drone dispatched")
 	}
 
-	m.hub.BroadcastHandoffInitiatedFull(string(trip.ID), droneID, droneETA, resp.Reasoning, resp.PredictedETASeconds)
+	m.hub.BroadcastHandoffInitiatedFull(string(trip.ID), droneID, droneETA, pred.Reasoning, pred.PredictedETASeconds, meta)
 }

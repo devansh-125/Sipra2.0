@@ -117,8 +117,8 @@ function DriverScene({
   onStateChange: (s: PovState) => void;
   onDistanceChange: (d: number | null) => void;
 }) {
-  const { corridorGeoJSON } = useSipraWebSocket();
-  const { corridorGeometry: routeCorridor } = useMission();
+  const { corridorGeometry: routeCorridor, trip } = useMission();
+  const { corridorGeoJSON } = useSipraWebSocket(undefined, trip?.id ?? null);
   // Prefer the road-aligned corridor; fall back to WS-pushed GeoJSON.
   const corridorForDetection = (routeCorridor ?? corridorGeoJSON) as import('geojson').Geometry | null;
   const map = useMap();

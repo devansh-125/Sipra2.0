@@ -162,10 +162,21 @@ func (r *TripRepo) ListInTransit(ctx context.Context) ([]domain.Trip, error) {
 	return trips, rows.Err()
 }
 
-const sqlUpdateStatus = `UPDATE trips SET status = $2::trip_status, updated_at = $3 WHERE id = $1`
+const sqlUpdateStatus = `
+UPDATE trips
+SET status       = $2::trip_status,
+    updated_at   = $3,
+    started_at   = CASE WHEN $2::trip_status = 'InTransit'
+                        THEN COALESCE(started_at, $3)
+                        ELSE started_at END,
+    completed_at = CASE WHEN $2::trip_status IN ('Completed','DroneHandoff','Failed')
+                        THEN COALESCE(completed_at, $3)
+                        ELSE completed_at END
+WHERE id = $1`
 
 // UpdateStatus persists a status transition that has already been validated by
-// the domain's TransitionTo method.
+// the domain's TransitionTo method. It also stamps started_at on InTransit and
+// completed_at on terminal transitions so the row is always queryable.
 func (r *TripRepo) UpdateStatus(ctx context.Context, id domain.TripID, status domain.TripStatus, now time.Time) error {
 	_, err := r.pool.Exec(ctx, sqlUpdateStatus, string(id), string(status), now)
 	if err != nil {

@@ -56,15 +56,46 @@ export interface CorridorUpdatePayload {
   polygon_geojson: Geometry;
 }
 
+export interface DroneMetadata {
+  model: string;
+  max_payload_kg: number;
+  battery_pct: number;
+  launch_pad_id: string;
+  altitude_m_cruise: number;
+  cruise_kph: number;
+  route_km: number;
+}
+
 export interface HandoffInitiatedPayload {
   trip_id: string;
   drone_id?: string;
   eta_seconds?: number;
   reason: string;
   predicted_eta_seconds: number;
+  drone_metadata?: DroneMetadata;
 }
 
-export type WSMessageType = 'GPS_UPDATE' | 'CORRIDOR_UPDATE' | 'HANDOFF_INITIATED' | 'FLEET_UPDATE' | 'FLEET_SPAWN' | 'REROUTE_STATUS' | 'RISK_PREDICTION';
+export type Recommendation = 'CONTINUE' | 'REQUEST_BOUNTY_BOOST' | 'DISPATCH_DRONE';
+
+export interface TripCompletedPayload {
+  trip_id: string;
+  final_status: string;
+  drone_used: boolean;
+  deadline_met: boolean;
+  total_seconds: number;
+  distance_km: number;
+}
+
+export type WSMessageType =
+  | 'GPS_UPDATE'
+  | 'CORRIDOR_UPDATE'
+  | 'HANDOFF_INITIATED'
+  | 'FLEET_UPDATE'
+  | 'FLEET_SPAWN'
+  | 'REROUTE_STATUS'
+  | 'RISK_PREDICTION'
+  | 'BOUNTY_BOOST_REQUESTED'
+  | 'TRIP_COMPLETED';
 
 export interface RiskPredictionPayload {
   trip_id: string;
@@ -72,13 +103,20 @@ export interface RiskPredictionPayload {
   deadline_seconds_remaining: number;
   breach_probability: number;
   will_breach: boolean;
+  recommendation: Recommendation;
   weather_condition: string;
   weather_factor: number;
-  reasoning: string;
+  fleet_density_in_corridor: number;
+  fleet_penalty: number;
+  effective_speed_kph: number;
   ai_confidence: number;
-  ai_reasoning: string;
-  risk_factors: string[];
-  recommendations: string[];
+  reasoning: string;
+}
+
+export interface BountyBoostRequestedPayload {
+  trip_id: string;
+  breach_probability: number;
+  reason: string;
 }
 
 export interface FleetUpdatePayload {
@@ -92,7 +130,17 @@ export interface FleetSpawnPayload {
 export interface WSEnvelope {
   type: WSMessageType;
   timestamp: string;
-  payload: GPSUpdatePayload | CorridorUpdatePayload | HandoffInitiatedPayload | FleetUpdatePayload | FleetSpawnPayload | FleetVehicle[] | RerouteStatusPayload | RiskPredictionPayload;
+  payload:
+    | GPSUpdatePayload
+    | CorridorUpdatePayload
+    | HandoffInitiatedPayload
+    | FleetUpdatePayload
+    | FleetSpawnPayload
+    | FleetVehicle[]
+    | RerouteStatusPayload
+    | RiskPredictionPayload
+    | BountyBoostRequestedPayload
+    | TripCompletedPayload;
 }
 
 export type RerouteState = 'rerouting' | 'completed' | 'failed';

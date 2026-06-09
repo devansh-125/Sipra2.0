@@ -1,0 +1,401 @@
+{
+  "snapshot_at_seconds_into_trip": 5,
+  "ambulance_position": {
+    "lat": 12.9587,
+    "lng": 77.6442
+  },
+  "fleet": [
+    {
+      "id": "fleet-s2-A1",
+      "lat": 12.981,
+      "lng": 77.6175,
+      "speed_kph": 8,
+      "heading_deg": 308,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 150
+    },
+    {
+      "id": "fleet-s2-A2",
+      "lat": 12.9805,
+      "lng": 77.6155,
+      "speed_kph": 5,
+      "heading_deg": 305,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 165
+    },
+    {
+      "id": "fleet-s2-A3",
+      "lat": 12.983,
+      "lng": 77.6145,
+      "speed_kph": 4,
+      "heading_deg": 310,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 185
+    },
+    {
+      "id": "fleet-s2-A4",
+      "lat": 12.984,
+      "lng": 77.613,
+      "speed_kph": 6,
+      "heading_deg": 307,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 210
+    },
+    {
+      "id": "fleet-s2-B1",
+      "lat": 13.104,
+      "lng": 77.4315,
+      "speed_kph": 6,
+      "heading_deg": 308,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 750
+    },
+    {
+      "id": "fleet-s2-B2",
+      "lat": 13.1055,
+      "lng": 77.429,
+      "speed_kph": 4,
+      "heading_deg": 305,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 770
+    },
+    {
+      "id": "fleet-s2-B3",
+      "lat": 13.107,
+      "lng": 77.4275,
+      "speed_kph": 8,
+      "heading_deg": 310,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 800
+    },
+    {
+      "id": "fleet-s2-B4",
+      "lat": 13.109,
+      "lng": 77.425,
+      "speed_kph": 5,
+      "heading_deg": 306,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 830
+    },
+    {
+      "id": "fleet-s2-C1",
+      "lat": 13.2095,
+      "lng": 77.2865,
+      "speed_kph": 6,
+      "heading_deg": 307,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 1190
+    },
+    {
+      "id": "fleet-s2-C2",
+      "lat": 13.2105,
+      "lng": 77.2845,
+      "speed_kph": 8,
+      "heading_deg": 305,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 1215
+    },
+    {
+      "id": "fleet-s2-C3",
+      "lat": 13.212,
+      "lng": 77.2825,
+      "speed_kph": 4,
+      "heading_deg": 308,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 1245
+    },
+    {
+      "id": "fleet-s2-C4",
+      "lat": 13.2135,
+      "lng": 77.281,
+      "speed_kph": 7,
+      "heading_deg": 305,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 1275
+    },
+    {
+      "id": "fleet-s2-D1",
+      "lat": 13.3195,
+      "lng": 77.1265,
+      "speed_kph": 6,
+      "heading_deg": 308,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 1710
+    },
+    {
+      "id": "fleet-s2-D2",
+      "lat": 13.3205,
+      "lng": 77.1245,
+      "speed_kph": 5,
+      "heading_deg": 305,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 1730
+    },
+    {
+      "id": "fleet-s2-D3",
+      "lat": 13.3215,
+      "lng": 77.123,
+      "speed_kph": 8,
+      "heading_deg": 310,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 1760
+    },
+    {
+      "id": "fleet-s2-D4",
+      "lat": 13.3225,
+      "lng": 77.1215,
+      "speed_kph": 4,
+      "heading_deg": 306,
+      "evading": true,
+      "reroute_status": "BOUNTY_ACCEPTED",
+      "route_id": "route-nh48-mainline",
+      "spawn_at_seconds_into_trip": 1790
+    },
+    {
+      "id": "fleet-s2-N01",
+      "lat": 12.975,
+      "lng": 77.628,
+      "speed_kph": 18,
+      "heading_deg": 305,
+      "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s2-N02",
+      "lat": 12.992,
+      "lng": 77.602,
+      "speed_kph": 24,
+      "heading_deg": 308,
+      "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s2-N03",
+      "lat": 13.025,
+      "lng": 77.56,
+      "speed_kph": 55,
+      "heading_deg": 309,
+      "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s2-N04",
+      "lat": 13.055,
+      "lng": 77.515,
+      "speed_kph": 62,
+      "heading_deg": 310,
+      "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s2-N05",
+      "lat": 13.13,
+      "lng": 77.395,
+      "speed_kph": 35,
+      "heading_deg": 307,
+      "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s2-N06",
+      "lat": 13.185,
+      "lng": 77.325,
+      "speed_kph": 58,
+      "heading_deg": 305,
+      "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s2-N07",
+      "lat": 13.25,
+      "lng": 77.23,
+      "speed_kph": 65,
+      "heading_deg": 303,
+      "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s2-N08",
+      "lat": 13.29,
+      "lng": 77.165,
+      "speed_kph": 60,
+      "heading_deg": 302,
+      "evading": false,
+      "route_id": "route-nh48-mainline"
+    },
+    {
+      "id": "fleet-s2-O01",
+      "lat": 12.981,
+      "lng": 77.6135,
+      "speed_kph": 20,
+      "heading_deg": 128,
+      "evading": false,
+      "route_id": "route-nh48-oncoming"
+    },
+    {
+      "id": "fleet-s2-O02",
+      "lat": 13.108,
+      "lng": 77.425,
+      "speed_kph": 32,
+      "heading_deg": 128,
+      "evading": false,
+      "route_id": "route-nh48-oncoming"
+    },
+    {
+      "id": "fleet-s2-O03",
+      "lat": 13.215,
+      "lng": 77.278,
+      "speed_kph": 30,
+      "heading_deg": 125,
+      "evading": false,
+      "route_id": "route-nh48-oncoming"
+    },
+    {
+      "id": "fleet-s2-O04",
+      "lat": 13.322,
+      "lng": 77.119,
+      "speed_kph": 28,
+      "heading_deg": 122,
+      "evading": false,
+      "route_id": "route-nh48-oncoming"
+    },
+    {
+      "id": "fleet-s2-S01",
+      "lat": 12.9785,
+      "lng": 77.6195,
+      "speed_kph": 12,
+      "heading_deg": 300,
+      "evading": false,
+      "route_id": "route-yeshwantpur-local"
+    },
+    {
+      "id": "fleet-s2-S02",
+      "lat": 13.102,
+      "lng": 77.436,
+      "speed_kph": 14,
+      "heading_deg": 312,
+      "evading": false,
+      "route_id": "route-nh48-service"
+    },
+    {
+      "id": "fleet-s2-S03",
+      "lat": 13.207,
+      "lng": 77.29,
+      "speed_kph": 16,
+      "heading_deg": 302,
+      "evading": false,
+      "route_id": "route-nh48-service"
+    },
+    {
+      "id": "fleet-s2-S04",
+      "lat": 13.317,
+      "lng": 77.13,
+      "speed_kph": 14,
+      "heading_deg": 308,
+      "evading": false,
+      "route_id": "route-tumkur-ringroad"
+    },
+    {
+      "id": "fleet-s2-T01",
+      "lat": 13.336,
+      "lng": 77.1095,
+      "speed_kph": 18,
+      "heading_deg": 295,
+      "evading": false,
+      "route_id": "route-tumkur-city"
+    },
+    {
+      "id": "fleet-s2-T02",
+      "lat": 13.338,
+      "lng": 77.1055,
+      "speed_kph": 22,
+      "heading_deg": 300,
+      "evading": false,
+      "route_id": "route-tumkur-city"
+    },
+    {
+      "id": "fleet-s2-T03",
+      "lat": 13.334,
+      "lng": 77.114,
+      "speed_kph": 14,
+      "heading_deg": 130,
+      "evading": false,
+      "route_id": "route-tumkur-city"
+    },
+    {
+      "id": "fleet-s2-T04",
+      "lat": 13.34,
+      "lng": 77.101,
+      "speed_kph": 10,
+      "heading_deg": 120,
+      "evading": false,
+      "route_id": "route-tumkur-city"
+    },
+    {
+      "id": "fleet-s2-X01",
+      "lat": 13.02,
+      "lng": 77.575,
+      "speed_kph": 42,
+      "heading_deg": 35,
+      "evading": false,
+      "route_id": "route-bial-connector"
+    },
+    {
+      "id": "fleet-s2-X02",
+      "lat": 13.15,
+      "lng": 77.37,
+      "speed_kph": 50,
+      "heading_deg": 88,
+      "evading": false,
+      "route_id": "route-bial-connector"
+    },
+    {
+      "id": "fleet-s2-X03",
+      "lat": 13.235,
+      "lng": 77.25,
+      "speed_kph": 38,
+      "heading_deg": 210,
+      "evading": false,
+      "route_id": "route-state-highway"
+    },
+    {
+      "id": "fleet-s2-X04",
+      "lat": 13.31,
+      "lng": 77.145,
+      "speed_kph": 44,
+      "heading_deg": 180,
+      "evading": false,
+      "route_id": "route-state-highway"
+    }
+  ]
+}

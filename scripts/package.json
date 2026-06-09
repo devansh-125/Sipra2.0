@@ -10,12 +10,9 @@
     "scenario:happy": "tsx run-demo-scenario.ts --scenario=happy",
     "scenario:drone": "tsx run-demo-scenario.ts --scenario=drone",
     "play": "tsx play-scenario.ts",
-    "play:normal": "tsx play-scenario.ts --scenario=normal --speed=5",
-    "play:congestion": "tsx play-scenario.ts --scenario=congestion-breach --speed=5",
-    "play:spike": "tsx play-scenario.ts --scenario=sudden-spike-mid-route --speed=10",
-    "play:jitter": "tsx play-scenario.ts --scenario=gps-jitter-stale --speed=10",
-    "play:peak": "tsx play-scenario.ts --scenario=peak-hour-mg-road --speed=5",
-    "play:conflicting": "tsx play-scenario.ts --scenario=conflicting-etas"
+    "play:s1-normal": "tsx play-scenario.ts --scenario=s1-normal --speed=10",
+    "play:s2-congestion": "tsx play-scenario.ts --scenario=s2-congestion --speed=10",
+    "play:s3-drone-handoff": "tsx play-scenario.ts --scenario=s3-drone-handoff --speed=10"
   },
   "dependencies": {
     "ws": "^8.18.0"

@@ -1,5 +1,14 @@
 {
-  "drone_id": "SIPRA-DRONE-ABC123",
-  "eta_seconds": 240,
-  "status": "DISPATCHED"
+  "drone_id": "SIPRA-DRONE-A41Z",
+  "status": "DISPATCHED",
+  "eta_seconds": 2700,
+  "drone_metadata": {
+    "model": "Sipra-MK2",
+    "max_payload_kg": 4.5,
+    "battery_pct": 88,
+    "launch_pad_id": "BLR-PAD-03",
+    "altitude_m_cruise": 120,
+    "cruise_kph": 95,
+    "route_km": 71.4
+  }
 }

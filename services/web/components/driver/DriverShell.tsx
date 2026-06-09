@@ -278,7 +278,7 @@ export default function DriverShell({ tripId }: { tripId: string }) {
     process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/dashboard';
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
-  const { corridorGeoJSON, status } = useSipraWebSocket(wsUrl);
+  const { corridorGeoJSON, status } = useSipraWebSocket(wsUrl, tripId);
   const missionPolyline = useSafeMissionPolyline();
   const driverPosition = useCrawlPosition(INDIRANAGAR, missionPolyline.length >= 2 ? missionPolyline : undefined, 71);
 

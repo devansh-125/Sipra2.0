@@ -12,6 +12,7 @@ import type {
   RerouteState,
   RerouteStatusPayload,
   RiskPredictionPayload,
+  TripCompletedPayload,
   WSEnvelope,
 } from '../lib/types';
 
@@ -30,6 +31,9 @@ export interface SipraWSState {
   ambulanceSpeedKph: number | null;
   corridorGeoJSON: Geometry | null;
   handoffState: HandoffInitiatedPayload | null;
+  /** Wall-clock ms when handoffState was set. Anchors the drone-flight countdown. Null until first HANDOFF_INITIATED. */
+  handoffStartedAt: number | null;
+  tripCompleted: TripCompletedPayload | null;
   riskPrediction: RiskPredictionPayload | null;
   fleet: FleetVehicle[];
   rerouteStatuses: Record<string, {
@@ -44,9 +48,28 @@ export interface SipraWSState {
   lastEnvelopeType: string | null;
   recentEvents: RecentEvent[];
   clearHandoff: () => void;
+  clearTripCompleted: () => void;
+  /**
+   * Drops every piece of trip-tied state (ambulance position, corridor
+   * polygon, handoff banner, risk prediction, completion summary) without
+   * touching the WS connection itself. Used by MissionProvider so that
+   * switching scenarios (s1 → s2) starts the dashboard fresh instead of
+   * leaking the previous trip's drone-handoff banner.
+   */
+  resetForTrip: () => void;
 }
 
-type SharedState = Omit<SipraWSState, 'clearHandoff'>;
+type SharedState = Omit<SipraWSState, 'clearHandoff' | 'clearTripCompleted' | 'resetForTrip'> & {
+  // Source trip_id for each piece of trip-scoped state. Used by the hook to
+  // drop updates that belong to a different trip than the one this dashboard
+  // tab is viewing (e.g. orphan trips still being polled by the Risk Monitor
+  // after a prior scenario was aborted).
+  ambulanceTripId: string | null;
+  corridorTripId: string | null;
+  handoffTripId: string | null;
+  tripCompletedTripId: string | null;
+  riskPredictionTripId: string | null;
+};
 type Listener = (state: SharedState) => void;
 
 interface SharedConnection {
@@ -76,6 +99,8 @@ function createInitialState(): SharedState {
     ambulanceSpeedKph: null,
     corridorGeoJSON: null,
     handoffState: null,
+    handoffStartedAt: null,
+    tripCompleted: null,
     riskPrediction: null,
     fleet: [],
     rerouteStatuses: {},
@@ -83,6 +108,11 @@ function createInitialState(): SharedState {
     lastMessageAt: null,
     lastEnvelopeType: null,
     recentEvents: [],
+    ambulanceTripId: null,
+    corridorTripId: null,
+    handoffTripId: null,
+    tripCompletedTripId: null,
+    riskPredictionTripId: null,
   };
 }
 
@@ -142,15 +172,17 @@ function applyMessage(prev: SharedState, msg: WSEnvelope, now: number): SharedSt
         ambulanceLat: p.lat,
         ambulanceLng: p.lng,
         ambulanceSpeedKph: p.speed_kph ?? null,
+        ambulanceTripId: p.trip_id,
       };
     }
     case 'CORRIDOR_UPDATE': {
       const p = msg.payload as CorridorUpdatePayload;
-      return { ...base, corridorGeoJSON: p.polygon_geojson };
+      return { ...base, corridorGeoJSON: p.polygon_geojson, corridorTripId: p.trip_id };
     }
     case 'HANDOFF_INITIATED': {
       const p = msg.payload as HandoffInitiatedPayload;
-      return { ...base, handoffState: p };
+      // Reset the start anchor every time a fresh handoff arrives (new trip).
+      return { ...base, handoffState: p, handoffStartedAt: now, handoffTripId: p.trip_id };
     }
     case 'FLEET_UPDATE': {
       const payload = msg.payload as FleetUpdatePayload | FleetVehicle[];
@@ -181,7 +213,11 @@ function applyMessage(prev: SharedState, msg: WSEnvelope, now: number): SharedSt
     }
     case 'RISK_PREDICTION': {
       const p = msg.payload as RiskPredictionPayload;
-      return { ...base, riskPrediction: p };
+      return { ...base, riskPrediction: p, riskPredictionTripId: p.trip_id };
+    }
+    case 'TRIP_COMPLETED': {
+      const p = msg.payload as TripCompletedPayload;
+      return { ...base, tripCompleted: p, tripCompletedTripId: p.trip_id };
     }
     default:
       return base;
@@ -277,14 +313,61 @@ function subscribe(url: string, listener: Listener): () => void {
 
 export function useSipraWebSocket(
   url: string = process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/dashboard',
+  activeTripId: string | null = null,
 ): SipraWSState {
   const [state, setState] = useState<SharedState>(() => getSharedConnection(url).state);
 
   useEffect(() => subscribe(url, setState), [url]);
 
+  // Filter trip-scoped state by activeTripId. When no trip is selected
+  // (activeTripId === null) the connection-level data is shown unfiltered
+  // for backward compatibility with consumers that don't pass a tripId.
+  // When a tripId is set, GPS/corridor/handoff/risk/completion fields are
+  // hidden unless the underlying payload's trip_id matches — preventing
+  // cross-trip leakage and stale state from prior runs.
+  const matches = (tid: string | null): boolean =>
+    activeTripId === null || tid === activeTripId;
+
+  const filtered: SharedState = {
+    ...state,
+    ambulanceLat:       matches(state.ambulanceTripId)       ? state.ambulanceLat       : null,
+    ambulanceLng:       matches(state.ambulanceTripId)       ? state.ambulanceLng       : null,
+    ambulanceSpeedKph:  matches(state.ambulanceTripId)       ? state.ambulanceSpeedKph  : null,
+    corridorGeoJSON:    matches(state.corridorTripId)        ? state.corridorGeoJSON    : null,
+    handoffState:       matches(state.handoffTripId)         ? state.handoffState       : null,
+    handoffStartedAt:   matches(state.handoffTripId)         ? state.handoffStartedAt   : null,
+    tripCompleted:      matches(state.tripCompletedTripId)   ? state.tripCompleted      : null,
+    riskPrediction:     matches(state.riskPredictionTripId)  ? state.riskPrediction     : null,
+  };
+
   const clearHandoff = useCallback(() => {
     const connection = getSharedConnection(url);
     setSharedState(connection, prev => ({ ...prev, handoffState: null }));
+  }, [url]);
+
+  const clearTripCompleted = useCallback(() => {
+    const connection = getSharedConnection(url);
+    setSharedState(connection, prev => ({ ...prev, tripCompleted: null }));
+  }, [url]);
+
+  const resetForTrip = useCallback(() => {
+    const connection = getSharedConnection(url);
+    setSharedState(connection, prev => ({
+      ...prev,
+      ambulanceLat: null,
+      ambulanceLng: null,
+      ambulanceSpeedKph: null,
+      corridorGeoJSON: null,
+      handoffState: null,
+      handoffStartedAt: null,
+      tripCompleted: null,
+      riskPrediction: null,
+      ambulanceTripId: null,
+      corridorTripId: null,
+      handoffTripId: null,
+      tripCompletedTripId: null,
+      riskPredictionTripId: null,
+    }));
   }, [url]);
 
   useEffect(() => {
@@ -292,15 +375,18 @@ export function useSipraWebSocket(
 
     window.__fakeHandoff = () => {
       const connection = getSharedConnection(url);
+      const fakeTripId = activeTripId ?? 'dev-fake-trip-0000';
       setSharedState(connection, prev => ({
         ...prev,
         handoffState: {
-          trip_id: 'dev-fake-trip-0000',
+          trip_id: fakeTripId,
           drone_id: 'DRONE-DEV-01',
           eta_seconds: 120,
           reason: 'DEV fake handoff - golden hour breach predicted',
           predicted_eta_seconds: 180,
         },
+        handoffStartedAt: Date.now(),
+        handoffTripId: fakeTripId,
         lastEnvelopeType: 'HANDOFF_INITIATED',
       }));
     };
@@ -308,7 +394,7 @@ export function useSipraWebSocket(
     return () => {
       delete window.__fakeHandoff;
     };
-  }, [url]);
+  }, [url, activeTripId]);
 
-  return { ...state, clearHandoff };
+  return { ...filtered, clearHandoff, clearTripCompleted, resetForTrip };
 }

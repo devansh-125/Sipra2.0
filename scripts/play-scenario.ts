@@ -13,14 +13,12 @@
  *
  * Usage:
  *   cd scripts
- *   npx tsx play-scenario.ts --scenario=normal
- *   npx tsx play-scenario.ts --scenario=congestion-breach     --speed=5
- *   npx tsx play-scenario.ts --scenario=sudden-spike-mid-route --speed=10
- *   npx tsx play-scenario.ts --scenario=gps-jitter-stale       --speed=10
+ *   npx tsx play-scenario.ts --scenario=s1-normal --speed=10
+ *   npx tsx play-scenario.ts --scenario=s2-congestion --speed=10
+ *   npx tsx play-scenario.ts --scenario=s3-drone-handoff --speed=10
  *
  * Available scenarios:
- *   normal | congestion-breach | sudden-spike-mid-route | gps-jitter-stale
- *   peak-hour-mg-road | conflicting-etas
+ *   s1-normal | s2-congestion | s3-drone-handoff
  *
  * Options:
  *   --scenario=<name>   required
@@ -65,8 +63,7 @@ function parseArgs(): CliArgs {
   const scenario = (kv['scenario'] ?? '').trim();
   if (!scenario) {
     console.error('  ✗ --scenario=<name> is required');
-    console.error('    valid: normal | congestion-breach | sudden-spike-mid-route |');
-    console.error('           gps-jitter-stale | peak-hour-mg-road | conflicting-etas');
+    console.error('    valid: s1-normal | s2-congestion | s3-drone-handoff');
     process.exit(2);
   }
   return {
@@ -250,7 +247,7 @@ interface PingRow {
   heading_deg?: number;
   accuracy_m?: number;
   recorded_at?: string;
-  note?:       string;  // gps-jitter-stale annotation — ignored
+  note?:       string;  // dataset annotation — ignored
 }
 
 async function streamPings(
@@ -278,7 +275,7 @@ async function streamPings(
     const offsetSec = parseOffsetSeconds(ping.recorded_at);
 
     if (offsetSec !== null) {
-      // Scenario has explicit T+ offsets (e.g. gps-jitter-stale)
+      // Scenario has explicit T+ offsets
       body['recorded_at'] = offsetToRFC3339(baseMs, offsetSec);
       const targetMs = Math.round(offsetSec * 1000 / speedMult);
       waitMs = Math.max(0, targetMs - prevOffsetMs);
@@ -314,6 +311,7 @@ interface FleetVehicle {
   id:            string;
   lat:           number;
   lng:           number;
+  speed_kph?:    number;
   evading?:      boolean;
   heading_deg?:  number;
   route_id?:     string;
@@ -364,7 +362,7 @@ async function runFleetLoop(
     status:         v.evading ? 'evading' : 'active',
     route_id:       v.route_id,
     reroute_status: v.reroute_status,
-    speed_kph:      v.evading ? 35 : 25,
+    speed_kph:      v.speed_kph ?? (v.evading ? 35 : 25),
   }));
 
   let ticks = 0;
@@ -446,60 +444,6 @@ async function runSingle(dir: string, speedMult: number, noFleet: boolean): Prom
   done.done = true;
 }
 
-async function runGpsJitterStale(dir: string, speedMult: number): Promise<void> {
-  const pingsFile = path.join(dir, 'pings.ndjson');
-  const pings     = readNdjson<PingRow>(pingsFile);
-
-  // Create a minimal trip for this GPS edge-case scenario
-  const deadline = new Date(Date.now() + 120 * 60_000).toISOString();
-  const body = {
-    cargo_category:       'Vaccine',
-    cargo_description:    'GPS jitter/stale edge-case replay — Manipal HAL → Sri Siddhartha',
-    cargo_tolerance_celsius: 2.0,
-    origin:               { lat: 12.9587, lng: 77.6442 },
-    destination:          { lat: 13.3379, lng: 77.1031 },
-    golden_hour_deadline: deadline,
-    ambulance_id:         'AMB-JITTER-TEST',
-    hospital_dispatch_id: 'Manipal-HAL-BLR',
-  };
-
-  const res = await post<CreateTripResp>('/api/v1/trips', body);
-  log.ok(`trip created   id=${res.trip_id}  deadline=${deadline}`);
-  await post(`/api/v1/trips/${res.trip_id}/start`, undefined);
-  log.ok('trip started   status=InTransit');
-
-  const baseMs = Date.now();
-  await streamPings(res.trip_id, pings, baseMs, speedMult);
-
-  log.info('expected hygiene output: 9 of 25 pings dropped/clamped');
-  log.info('check pings.expected-after-hygiene.ndjson for the reference list');
-}
-
-async function runConflictingEtas(dir: string, speedMult: number): Promise<void> {
-  interface MultiTrips { trips: Array<TripJson & { label?: string }> }
-  const { trips } = readJson<MultiTrips>(path.join(dir, 'trips.json'));
-
-  log.section(`creating ${trips.length} concurrent trips`);
-  const ids: string[] = [];
-  for (const t of trips) {
-    const label = (t as { label?: string }).label ?? t.ambulance_id;
-    log.info(`  → ${label}  (${t.cargo_category})`);
-    const id = await createAndStartTrip(t);
-    ids.push(id);
-  }
-
-  log.section('trips are now InTransit — risk monitor will poll each independently');
-  log.info('watch the WS monitor for interleaved RISK_PREDICTION events per trip_id');
-  log.info(`trip IDs: ${ids.join(' | ')}`);
-  log.info('');
-  log.info('Note: no pings.ndjson for conflicting-etas — the risk monitor will poll');
-  log.info('the origin position (no movement). Predicted ETAs depend on AI brain.');
-  log.info('Send custom pings with:');
-  for (const id of ids) {
-    log.info(`  curl -s -X POST ${BACKEND_HTTP}/api/v1/trips/${id}/pings -d '{"lat":12.96,"lng":77.64,"speed_kph":20}' -H "Content-Type: application/json"`);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -536,45 +480,16 @@ async function main(): Promise<void> {
 
   try {
     switch (scenario) {
-      case 'normal':
-      case 'congestion-breach':
-      case 'peak-hour-mg-road':
-      case 'sudden-spike-mid-route':
+      case 's1-normal':
+      case 's2-congestion':
+      case 's3-drone-handoff':
         await runSingle(dir, speed, noFleet);
-        break;
-
-      case 'gps-jitter-stale':
-        await runGpsJitterStale(dir, speed);
-        break;
-
-      case 'conflicting-etas':
-        await runConflictingEtas(dir, speed);
-        break;
-
-      case 'no-agents-available':
-        log.section('no-agents-available — reference scenario');
-        log.info('This scenario has no pings to stream.');
-        log.info(`Fleet snapshot (empty): ${path.join(dir, 'fleet-empty.json')}`);
-        log.info(`To test drain: POST ${BACKEND_HTTP}/api/v1/chaos/drain-fleet`);
-        log.info(`  body: ${fs.readFileSync(path.join(dir, 'chaos-event.json'), 'utf8').trim()}`);
-        break;
-
-      case 'drone-unavailable-fallback':
-        log.section('drone-unavailable-fallback — reference scenario');
-        log.info('This scenario documents the graceful-degradation code path.');
-        log.info('To trigger it, run the congestion-breach scenario while the');
-        log.info('drone-dispatch mock (port 4003) is stopped.');
-        log.info(`  cd services/mocks/drone-dispatch && npm stop  (or just don't start it)`);
-        log.info(`  npx tsx play-scenario.ts --scenario=congestion-breach --speed=5`);
-        log.info('Expected: HANDOFF_INITIATED fires with drone_id="" and eta_seconds=0');
         break;
 
       default:
         log.fatal(
           `unknown scenario "${scenario}".\n` +
-          `  valid: normal | congestion-breach | sudden-spike-mid-route |\n` +
-          `         gps-jitter-stale | peak-hour-mg-road | conflicting-etas |\n` +
-          `         no-agents-available | drone-unavailable-fallback`,
+          `  valid: s1-normal | s2-congestion | s3-drone-handoff`,
         );
     }
   } finally {

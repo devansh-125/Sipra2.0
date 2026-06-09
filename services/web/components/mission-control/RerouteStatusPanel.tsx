@@ -22,7 +22,7 @@ function formatTime(ts: number): string {
 
 export default function RerouteStatusPanel() {
   const { rerouteStatuses } = useSipraWebSocket(WS_URL);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   const entries = Object.entries(rerouteStatuses);
   const reroutingCount = entries.filter(([, v]) => v.status === 'rerouting').length;

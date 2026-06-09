@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devansh-125/sipra/services/core-go/internal/api/ws"
 	"github.com/devansh-125/sipra/services/core-go/internal/domain"
 	pgstore "github.com/devansh-125/sipra/services/core-go/internal/store/postgres"
 	"github.com/gofiber/fiber/v2"
@@ -14,11 +15,12 @@ import (
 // TripHandler holds the dependencies needed by trip-related endpoints.
 type TripHandler struct {
 	trips *pgstore.TripRepo
+	hub   *ws.Hub
 }
 
 // NewTripHandler constructs a TripHandler.
-func NewTripHandler(trips *pgstore.TripRepo) *TripHandler {
-	return &TripHandler{trips: trips}
+func NewTripHandler(trips *pgstore.TripRepo, hub *ws.Hub) *TripHandler {
+	return &TripHandler{trips: trips, hub: hub}
 }
 
 // createTripRequest is the JSON body accepted by POST /api/v1/trips.
@@ -149,5 +151,73 @@ func (h *TripHandler) StartTrip(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"trip_id": string(trip.ID),
 		"status":  string(domain.TripStatusInTransit),
+	})
+}
+
+// completeTripRequest is the optional JSON body for POST /api/v1/trips/:id/complete.
+type completeTripRequest struct {
+	DistanceKm float64 `json:"distance_km"`
+}
+
+// CompleteTrip handles POST /api/v1/trips/:id/complete.
+// Transitions an InTransit or DroneHandoff trip to Completed, then broadcasts
+// a TRIP_COMPLETED summary so the dashboard can show a mission summary overlay.
+func (h *TripHandler) CompleteTrip(c *fiber.Ctx) error {
+	id := domain.TripID(c.Params("id"))
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "trip id is required"})
+	}
+
+	var req completeTripRequest
+	_ = c.BodyParser(&req) // optional body — zero values are fine
+
+	trip, err := h.trips.GetByID(c.Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+		}
+		log.Error().Err(err).Str("trip_id", string(id)).Msg("complete trip: fetch failed")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch trip"})
+	}
+
+	droneUsed := trip.Status == domain.TripStatusDroneHandoff
+	now := time.Now().UTC()
+
+	if err := trip.TransitionTo(domain.TripStatusCompleted, now); err != nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+	}
+	if err := h.trips.UpdateStatus(c.Context(), trip.ID, domain.TripStatusCompleted, now); err != nil {
+		log.Error().Err(err).Str("trip_id", string(id)).Msg("complete trip: update status failed")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update trip status"})
+	}
+
+	totalSeconds := 0
+	if trip.StartedAt != nil {
+		totalSeconds = int(now.Sub(*trip.StartedAt).Seconds())
+	}
+	deadlineMet := now.Before(trip.GoldenHourDeadline)
+
+	h.hub.BroadcastTripCompleted(ws.TripCompletedPayload{
+		TripID:       string(trip.ID),
+		FinalStatus:  string(domain.TripStatusCompleted),
+		DroneUsed:    droneUsed,
+		DeadlineMet:  deadlineMet,
+		TotalSeconds: totalSeconds,
+		DistanceKm:   req.DistanceKm,
+	})
+
+	log.Info().
+		Str("trip_id", string(id)).
+		Bool("drone_used", droneUsed).
+		Bool("deadline_met", deadlineMet).
+		Int("total_seconds", totalSeconds).
+		Msg("trip completed")
+
+	return c.JSON(fiber.Map{
+		"trip_id":       string(trip.ID),
+		"status":        string(domain.TripStatusCompleted),
+		"drone_used":    droneUsed,
+		"deadline_met":  deadlineMet,
+		"total_seconds": totalSeconds,
 	})
 }

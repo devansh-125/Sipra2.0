@@ -32,27 +32,62 @@ func (f *fakeTripStore) UpdateStatus(_ context.Context, id domain.TripID, _ doma
 }
 
 type fakePingStore struct {
-	ping *domain.GPSPing
-	err  error
+	pings []domain.GPSPing
+	err   error
 }
 
 func (f *fakePingStore) GetLatest(_ context.Context, _ domain.TripID) (*domain.GPSPing, error) {
-	return f.ping, f.err
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.pings) == 0 {
+		return nil, errors.New("no pings")
+	}
+	p := f.pings[0]
+	return &p, nil
+}
+
+func (f *fakePingStore) GetRecent(_ context.Context, _ domain.TripID, _ int) ([]domain.GPSPing, error) {
+	return f.pings, f.err
+}
+
+type fakeFleetDensity struct {
+	count int
+	err   error
+}
+
+func (f *fakeFleetDensity) CountInRadius(_ context.Context, _, _ float64, _ float64) (int, error) {
+	return f.count, f.err
 }
 
 type fakePredictor struct {
-	resp *risk.PredictResponse
+	resp *risk.DecideResponse
 	err  error
 }
 
-func (f *fakePredictor) Predict(_ context.Context, _ risk.PredictRequest) (*risk.PredictResponse, error) {
+func (f *fakePredictor) Decide(_ context.Context, _ risk.DecideRequest) (*risk.DecideResponse, error) {
 	return f.resp, f.err
 }
 
+func (f *fakePredictor) PredictDrone(_ context.Context, req risk.DronePredictRequest) (*risk.DronePredictResponse, error) {
+	return &risk.DronePredictResponse{
+		TripID:           req.TripID,
+		RouteKM:          50.0,
+		CruiseKPH:        95.0,
+		AltitudeMCruise:  120,
+		SpinUpSeconds:    30,
+		FlightSeconds:    1894,
+		ETASeconds:       1924,
+		WeatherCondition: "clear",
+		WeatherFactor:    1.0,
+		PayloadFactor:    1.0,
+	}, nil
+}
+
 type fakeDroneDispatcher struct {
-	resp        *risk.DispatchResponse
-	err         error
-	dispatched  []risk.DispatchRequest
+	resp       *risk.DispatchResponse
+	err        error
+	dispatched []risk.DispatchRequest
 }
 
 func (f *fakeDroneDispatcher) Dispatch(_ context.Context, req risk.DispatchRequest) (*risk.DispatchResponse, error) {
@@ -71,12 +106,23 @@ func inTransitTrip(id string) domain.Trip {
 	}
 }
 
-func latestPing(tripID string) *domain.GPSPing {
-	speed := 40.0
-	return &domain.GPSPing{
-		TripID:   domain.TripID(tripID),
-		Location: domain.Point{Lat: 12.8000, Lng: 77.4000},
-		SpeedKPH: &speed,
+func recentPings(tripID string, n int, speed float64) []domain.GPSPing {
+	out := make([]domain.GPSPing, 0, n)
+	s := speed
+	for i := 0; i < n; i++ {
+		out = append(out, domain.GPSPing{
+			TripID:   domain.TripID(tripID),
+			Location: domain.Point{Lat: 12.8000, Lng: 77.4000},
+			SpeedKPH: &s,
+		})
+	}
+	return out
+}
+
+func decideResp(action risk.DecisionAction, pred risk.PredictResponse) *risk.DecideResponse {
+	return &risk.DecideResponse{
+		Prediction: pred,
+		Decision:   risk.DecisionResult{Action: action},
 	}
 }
 
@@ -84,40 +130,62 @@ func newMonitor(trips risk.TripStore, pings risk.PingStore, p risk.Predictor, d 
 	if d == nil {
 		d = &fakeDroneDispatcher{resp: &risk.DispatchResponse{DroneID: "test-drone", ETASeconds: 300, Status: "DISPATCHED"}}
 	}
-	return risk.NewMonitor(trips, pings, p, ws.NewHub(), d, time.Hour)
+	density := &fakeFleetDensity{count: 0}
+	return risk.NewMonitor(trips, pings, p, ws.NewHub(), d, density, time.Hour)
 }
 
 // --- tests ---
 
-func TestEvaluateOnce_HandoffWhenWillBreach(t *testing.T) {
+func TestEvaluateOnce_HandoffOnDispatchDroneRecommendation(t *testing.T) {
 	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-1")}}
-	pings := &fakePingStore{ping: latestPing("trip-1")}
-	pred := &fakePredictor{resp: &risk.PredictResponse{
-		WillBreach: true, PredictedETASeconds: 4500, Reasoning: "ETA exceeds deadline",
-	}}
+	pings := &fakePingStore{pings: recentPings("trip-1", 5, 40)}
+	pred := &fakePredictor{resp: decideResp(risk.DecisionActionDispatchDrone, risk.PredictResponse{
+		WillBreach:          true,
+		PredictedETASeconds: 4500,
+		Reasoning:           "ETA exceeds deadline",
+	})}
 
 	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if len(trips.updated) != 1 || trips.updated[0] != "trip-1" {
-		t.Fatalf("expected trip-1 updated to DroneHandoff, got %v", trips.updated)
+		t.Fatalf("expected trip-1 transitioned to DroneHandoff, got %v", trips.updated)
 	}
 }
 
-func TestEvaluateOnce_NoHandoffWhenNoBreach(t *testing.T) {
+func TestEvaluateOnce_NoHandoffOnContinue(t *testing.T) {
 	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-2")}}
-	pings := &fakePingStore{ping: latestPing("trip-2")}
-	pred := &fakePredictor{resp: &risk.PredictResponse{WillBreach: false, PredictedETASeconds: 1800}}
+	pings := &fakePingStore{pings: recentPings("trip-2", 5, 60)}
+	pred := &fakePredictor{resp: decideResp(risk.DecisionActionContinue, risk.PredictResponse{
+		WillBreach:          false,
+		PredictedETASeconds: 1800,
+	})}
 
 	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if len(trips.updated) != 0 {
-		t.Fatalf("expected no status update, got %v", trips.updated)
+		t.Fatalf("expected no status update on CONTINUE, got %v", trips.updated)
+	}
+}
+
+func TestEvaluateOnce_NoHandoffOnBountyBoost(t *testing.T) {
+	// REQUEST_BOUNTY_BOOST should emit a WS event but never transition the trip.
+	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-2b")}}
+	pings := &fakePingStore{pings: recentPings("trip-2b", 5, 35)}
+	pred := &fakePredictor{resp: decideResp(risk.DecisionActionRequestBountyBoost, risk.PredictResponse{
+		BreachProbability:   0.55,
+		PredictedETASeconds: 2800,
+	})}
+
+	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
+
+	if len(trips.updated) != 0 {
+		t.Fatalf("expected no status update on REQUEST_BOUNTY_BOOST, got %v", trips.updated)
 	}
 }
 
 func TestEvaluateOnce_SkipsOnPredictError(t *testing.T) {
 	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-3")}}
-	pings := &fakePingStore{ping: latestPing("trip-3")}
+	pings := &fakePingStore{pings: recentPings("trip-3", 5, 40)}
 	pred := &fakePredictor{err: errors.New("ai brain unreachable")}
 
 	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
@@ -127,22 +195,21 @@ func TestEvaluateOnce_SkipsOnPredictError(t *testing.T) {
 	}
 }
 
-func TestEvaluateOnce_SkipsOnNoPing(t *testing.T) {
+func TestEvaluateOnce_SkipsOnNoPings(t *testing.T) {
 	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-4")}}
 	pings := &fakePingStore{err: errors.New("no pings yet")}
-	pred := &fakePredictor{resp: &risk.PredictResponse{WillBreach: true}}
+	pred := &fakePredictor{resp: decideResp(risk.DecisionActionDispatchDrone, risk.PredictResponse{})}
 
 	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
 	if len(trips.updated) != 0 {
-		t.Fatalf("expected no update when ping unavailable, got %v", trips.updated)
+		t.Fatalf("expected no update when pings unavailable, got %v", trips.updated)
 	}
 }
 
 func TestEvaluateOnce_SkipsAlreadyHandoff(t *testing.T) {
-	// A trip that is already in DroneHandoff should not be re-listed (status='InTransit'
-	// query won't return it), but even if it somehow arrives here the state machine
-	// rejects the transition gracefully.
+	// A trip already in DroneHandoff should not be re-listed by the InTransit query;
+	// even if it somehow lands here, the state machine rejects the transition gracefully.
 	trip := domain.Trip{
 		ID:                 "trip-5",
 		Status:             domain.TripStatusDroneHandoff,
@@ -150,8 +217,8 @@ func TestEvaluateOnce_SkipsAlreadyHandoff(t *testing.T) {
 		Destination:        domain.Point{Lat: 12.9716, Lng: 77.5946},
 	}
 	trips := &fakeTripStore{trips: []domain.Trip{trip}}
-	pings := &fakePingStore{ping: latestPing("trip-5")}
-	pred := &fakePredictor{resp: &risk.PredictResponse{WillBreach: true}}
+	pings := &fakePingStore{pings: recentPings("trip-5", 5, 40)}
+	pred := &fakePredictor{resp: decideResp(risk.DecisionActionDispatchDrone, risk.PredictResponse{})}
 
 	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
@@ -160,35 +227,70 @@ func TestEvaluateOnce_SkipsAlreadyHandoff(t *testing.T) {
 	}
 }
 
-func TestEvaluateOnce_UsesDefaultSpeedWhenNil(t *testing.T) {
-	// Verify the monitor doesn't panic when SpeedKPH is nil.
+func TestEvaluateOnce_UsesDefaultSpeedWhenAllPingsLackSpeed(t *testing.T) {
 	trip := inTransitTrip("trip-6")
-	ping := &domain.GPSPing{
+	pingsWithoutSpeed := []domain.GPSPing{{
 		TripID:   "trip-6",
 		Location: domain.Point{Lat: 12.8, Lng: 77.4},
 		SpeedKPH: nil,
-	}
-	var capturedReq risk.PredictRequest
+	}}
+	var capturedReq risk.DecideRequest
 	pred := &capturePredictor{
 		capture: &capturedReq,
-		resp:    &risk.PredictResponse{WillBreach: false},
+		resp:    decideResp(risk.DecisionActionContinue, risk.PredictResponse{}),
 	}
 	trips := &fakeTripStore{trips: []domain.Trip{trip}}
-	pings := &fakePingStore{ping: ping}
+	pings := &fakePingStore{pings: pingsWithoutSpeed}
 
 	newMonitor(trips, pings, pred, nil).EvaluateOnce(context.Background())
 
-	if capturedReq.AvgSpeedKPH != 40.0 {
-		t.Fatalf("expected default speed 40 kph, got %v", capturedReq.AvgSpeedKPH)
+	if len(capturedReq.RecentSpeedsKPH) != 1 || capturedReq.RecentSpeedsKPH[0] != 40.0 {
+		t.Fatalf("expected default speed [40], got %v", capturedReq.RecentSpeedsKPH)
 	}
 }
 
-func TestEvaluateOnce_DispatchesDroneOnHandoff(t *testing.T) {
+func TestEvaluateOnce_PassesRecentSpeedsAndDensity(t *testing.T) {
+	trip := inTransitTrip("trip-6b")
+	var capturedReq risk.DecideRequest
+	pred := &capturePredictor{
+		capture: &capturedReq,
+		resp:    decideResp(risk.DecisionActionContinue, risk.PredictResponse{}),
+	}
+	trips := &fakeTripStore{trips: []domain.Trip{trip}}
+	speeds := []float64{42, 40, 38, 36, 34}
+	pps := make([]domain.GPSPing, 0, len(speeds))
+	for _, s := range speeds {
+		s := s
+		pps = append(pps, domain.GPSPing{
+			TripID:   "trip-6b",
+			Location: domain.Point{Lat: 12.8, Lng: 77.4},
+			SpeedKPH: &s,
+		})
+	}
+	pings := &fakePingStore{pings: pps}
+	density := &fakeFleetDensity{count: 7}
+
+	risk.NewMonitor(trips, pings, pred, ws.NewHub(),
+		&fakeDroneDispatcher{resp: &risk.DispatchResponse{Status: "DISPATCHED"}},
+		density, time.Hour,
+	).EvaluateOnce(context.Background())
+
+	if len(capturedReq.RecentSpeedsKPH) != 5 {
+		t.Fatalf("expected 5 recent speeds forwarded, got %d", len(capturedReq.RecentSpeedsKPH))
+	}
+	if capturedReq.FleetDensityInCorridor != 7 {
+		t.Fatalf("expected fleet density 7, got %d", capturedReq.FleetDensityInCorridor)
+	}
+}
+
+func TestEvaluateOnce_DispatchesDroneOnDispatchDroneRec(t *testing.T) {
 	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-7")}}
-	pings := &fakePingStore{ping: latestPing("trip-7")}
-	pred := &fakePredictor{resp: &risk.PredictResponse{
-		WillBreach: true, PredictedETASeconds: 4500, Reasoning: "ETA exceeds deadline",
-	}}
+	pings := &fakePingStore{pings: recentPings("trip-7", 5, 20)}
+	pred := &fakePredictor{resp: decideResp(risk.DecisionActionDispatchDrone, risk.PredictResponse{
+		WillBreach:          true,
+		PredictedETASeconds: 4500,
+		Reasoning:           "ETA exceeds deadline",
+	})}
 	drone := &fakeDroneDispatcher{
 		resp: &risk.DispatchResponse{DroneID: "SIPRA-DRONE-ABC123", ETASeconds: 240, Status: "DISPATCHED"},
 	}
@@ -207,14 +309,14 @@ func TestEvaluateOnce_DispatchesDroneOnHandoff(t *testing.T) {
 	}
 }
 
-func TestEvaluateOnce_HandoffBroadcastsWithoutDroneOnDispatchError(t *testing.T) {
-	// Drone dispatch failure must not prevent the DroneHandoff transition from
-	// being persisted and the WebSocket event from being sent.
+func TestEvaluateOnce_HandoffSucceedsEvenIfDispatchFails(t *testing.T) {
 	trips := &fakeTripStore{trips: []domain.Trip{inTransitTrip("trip-8")}}
-	pings := &fakePingStore{ping: latestPing("trip-8")}
-	pred := &fakePredictor{resp: &risk.PredictResponse{
-		WillBreach: true, PredictedETASeconds: 3600, Reasoning: "breach imminent",
-	}}
+	pings := &fakePingStore{pings: recentPings("trip-8", 5, 20)}
+	pred := &fakePredictor{resp: decideResp(risk.DecisionActionDispatchDrone, risk.PredictResponse{
+		WillBreach:          true,
+		PredictedETASeconds: 3600,
+		Reasoning:           "breach imminent",
+	})}
 	drone := &fakeDroneDispatcher{err: errors.New("drone fleet offline")}
 
 	newMonitor(trips, pings, pred, drone).EvaluateOnce(context.Background())
@@ -224,13 +326,24 @@ func TestEvaluateOnce_HandoffBroadcastsWithoutDroneOnDispatchError(t *testing.T)
 	}
 }
 
-// capturePredictor records the last PredictRequest it received.
+// capturePredictor records the last DecideRequest it received.
 type capturePredictor struct {
-	capture *risk.PredictRequest
-	resp    *risk.PredictResponse
+	capture *risk.DecideRequest
+	resp    *risk.DecideResponse
 }
 
-func (c *capturePredictor) Predict(_ context.Context, req risk.PredictRequest) (*risk.PredictResponse, error) {
+func (c *capturePredictor) Decide(_ context.Context, req risk.DecideRequest) (*risk.DecideResponse, error) {
 	*c.capture = req
 	return c.resp, nil
+}
+
+func (c *capturePredictor) PredictDrone(_ context.Context, req risk.DronePredictRequest) (*risk.DronePredictResponse, error) {
+	return &risk.DronePredictResponse{
+		TripID:           req.TripID,
+		CruiseKPH:        95.0,
+		AltitudeMCruise:  120,
+		WeatherCondition: "clear",
+		WeatherFactor:    1.0,
+		PayloadFactor:    1.0,
+	}, nil
 }

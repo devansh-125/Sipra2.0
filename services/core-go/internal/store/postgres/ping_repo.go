@@ -41,6 +41,18 @@ WHERE trip_id = $1
 ORDER BY recorded_at DESC
 LIMIT 1`
 
+const sqlGetRecentPings = `
+SELECT
+    id, trip_id,
+    ST_Y(location) AS lat,
+    ST_X(location) AS lng,
+    heading_deg, speed_kph, accuracy_m,
+    recorded_at, ingested_at
+FROM gps_pings
+WHERE trip_id = $1
+ORDER BY recorded_at DESC
+LIMIT $2`
+
 // GetLatest returns the most recent GPS ping for a trip.
 // Returns an error if no pings exist yet.
 func (r *PingRepo) GetLatest(ctx context.Context, tripID domain.TripID) (*domain.GPSPing, error) {
@@ -64,6 +76,45 @@ func (r *PingRepo) GetLatest(ctx context.Context, tripID domain.TripID) (*domain
 	p.ID = domain.PingID(idStr)
 	p.TripID = domain.TripID(tripStr)
 	return &p, nil
+}
+
+// GetRecent returns up to `limit` most recent pings for a trip, ordered
+// newest-first. Used by the Risk Monitor to assemble the recent_speeds_kph[]
+// vector that the AI brain residual model expects.
+func (r *PingRepo) GetRecent(ctx context.Context, tripID domain.TripID, limit int) ([]domain.GPSPing, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+
+	rows, err := r.pool.Query(ctx, sqlGetRecentPings, string(tripID), limit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent pings for trip %s: %w", tripID, err)
+	}
+	defer rows.Close()
+
+	var out []domain.GPSPing
+	for rows.Next() {
+		var (
+			p       domain.GPSPing
+			idStr   string
+			tripStr string
+		)
+		if err := rows.Scan(
+			&idStr, &tripStr,
+			&p.Location.Lat, &p.Location.Lng,
+			&p.HeadingDeg, &p.SpeedKPH, &p.AccuracyM,
+			&p.RecordedAt, &p.IngestedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan recent ping for trip %s: %w", tripID, err)
+		}
+		p.ID = domain.PingID(idStr)
+		p.TripID = domain.TripID(tripStr)
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recent pings for trip %s: %w", tripID, err)
+	}
+	return out, nil
 }
 
 // BatchInsert writes a slice of pings to Postgres in a single network

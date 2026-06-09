@@ -483,7 +483,7 @@ func (h *ChaosHandler) runFleetEvacuation(tripID string, centerLat, centerLng, b
 				frame[i] = v.vehicle
 				continue
 			}
-			updateEvacuationVehicle(&v, dt)
+			updateEvacuationVehicle(&v, dt, centerLat, centerLng, baseRadiusM)
 			v.replanTicks++
 			run[i] = v
 			frame[i] = v.vehicle
@@ -502,8 +502,14 @@ func (h *ChaosHandler) runFleetEvacuation(tripID string, centerLat, centerLng, b
 	}
 
 	for _, v := range run {
-		if v.accepted {
+		if !v.accepted {
+			continue
+		}
+		// Only credit drivers who physically cleared the red zone.
+		if distanceM(centerLat, centerLng, v.vehicle.Lat, v.vehicle.Lng) > baseRadiusM {
 			h.hub.BroadcastRerouteStatus(v.vehicle.ID, tripID, "completed", v.bountyID, v.amountPts)
+		} else {
+			h.hub.BroadcastRerouteStatus(v.vehicle.ID, tripID, "failed", v.bountyID, 0)
 		}
 	}
 	log.Info().Str("trip", tripID).Int("drivers", len(run)).Msg("chaos: fleet evacuation completed")
@@ -545,7 +551,7 @@ func (h *ChaosHandler) replanEvadersWithValhalla(
 	}
 }
 
-func updateEvacuationVehicle(v *evacuationVehicle, dt float64) {
+func updateEvacuationVehicle(v *evacuationVehicle, dt, centerLat, centerLng, radiusM float64) {
 	const (
 		aBrakeMax  = 2.8
 		aAccelMax  = 1.7
@@ -616,7 +622,10 @@ func updateEvacuationVehicle(v *evacuationVehicle, dt float64) {
 
 	v.vehicle.Evading = v.state == driverEvadingPullingOver || v.state == driverHoldingClear
 	if v.accepted {
-		if v.state == driverNavigatingNormal {
+		// Verification requires the driver to physically exit the red zone — an
+		// FSM transition to NavigatingNormal alone is not sufficient.
+		outsideRed := distanceM(centerLat, centerLng, v.vehicle.Lat, v.vehicle.Lng) > radiusM
+		if v.state == driverNavigatingNormal && outsideRed {
 			v.vehicle.RerouteStatus = "completed"
 		} else {
 			v.vehicle.RerouteStatus = "rerouting"

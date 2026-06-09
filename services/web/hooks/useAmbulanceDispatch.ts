@@ -327,7 +327,7 @@ export function useAmbulanceDispatch(): DispatchState {
             signal: AbortSignal.timeout(10_000),
           });
 
-          if (res.ok) {
+          if (res.ok && res.status !== 204) {
             const json = await res.json() as {
               polylineEncoded?: string;
               etaSeconds?: number;

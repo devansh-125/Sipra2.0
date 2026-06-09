@@ -23,6 +23,8 @@ const (
 	MsgFleetSpawn       MessageType = "FLEET_SPAWN"
 	MsgRerouteStatus    MessageType = "REROUTE_STATUS"
 	MsgRiskPrediction   MessageType = "RISK_PREDICTION"
+	MsgBountyBoost      MessageType = "BOUNTY_BOOST_REQUESTED"
+	MsgTripCompleted    MessageType = "TRIP_COMPLETED"
 )
 
 // Envelope is the discriminated-union wrapper for all outbound WebSocket messages.
@@ -42,14 +44,42 @@ type GPSUpdatePayload struct {
 	RecordedAt time.Time `json:"recorded_at"`
 }
 
+// DroneMetadata mirrors the metadata block returned by the drone-dispatch
+// mock service. Surfaced on the dashboard's HandoffBanner so operators can
+// see the drone model, battery level, launch pad, and route geometry that
+// the autonomous fleet allocated to the breach. CruiseKPH and
+// AltitudeMCruise are floats because the AI brain derates them by live
+// weather (e.g. 73.5 kph in heavy rain).
+type DroneMetadata struct {
+	Model           string  `json:"model"`
+	MaxPayloadKG    float64 `json:"max_payload_kg"`
+	BatteryPct      int     `json:"battery_pct"`
+	LaunchPadID     string  `json:"launch_pad_id"`
+	AltitudeMCruise float64 `json:"altitude_m_cruise"`
+	CruiseKPH       float64 `json:"cruise_kph"`
+	RouteKM         float64 `json:"route_km"`
+}
+
 // HandoffInitiatedPayload signals that the AI brain predicted an ETA breach
 // and the trip has been transitioned to DroneHandoff.
 type HandoffInitiatedPayload struct {
-	TripID              string `json:"trip_id"`
-	DroneID             string `json:"drone_id,omitempty"`
-	ETASeconds          int    `json:"eta_seconds,omitempty"`
-	Reason              string `json:"reason"`
-	PredictedETASeconds int    `json:"predicted_eta_seconds"`
+	TripID              string         `json:"trip_id"`
+	DroneID             string         `json:"drone_id,omitempty"`
+	ETASeconds          int            `json:"eta_seconds,omitempty"`
+	Reason              string         `json:"reason"`
+	PredictedETASeconds int            `json:"predicted_eta_seconds"`
+	DroneMetadata       *DroneMetadata `json:"drone_metadata,omitempty"`
+}
+
+// BountyBoostRequestedPayload signals the AI brain recommended raising the
+// rolling bounty for nearby fleet vehicles to clear the corridor faster.
+// The actual surge calculation happens in the bounty engine (Phase 6); this
+// envelope is the trigger signal carried over the WebSocket so the dashboard
+// can show that the AI requested help before drone dispatch is needed.
+type BountyBoostRequestedPayload struct {
+	TripID            string  `json:"trip_id"`
+	BreachProbability float64 `json:"breach_probability"`
+	Reason            string  `json:"reason"`
 }
 
 // CorridorUpdatePayload carries the polygon as raw JSON so the frontend can
@@ -213,12 +243,12 @@ func (h *Hub) BroadcastCorridorUpdate(tripID, corridorID string, version, buffer
 // BroadcastHandoffInitiated fans a HANDOFF_INITIATED to every connected client.
 // droneID and etaSeconds are optional (populated in F3 once drone dispatch is wired).
 func (h *Hub) BroadcastHandoffInitiated(tripID, reason string, predictedETASeconds int) {
-	h.BroadcastHandoffInitiatedFull(tripID, "", 0, reason, predictedETASeconds)
+	h.BroadcastHandoffInitiatedFull(tripID, "", 0, reason, predictedETASeconds, nil)
 }
 
-// BroadcastHandoffInitiatedFull is the full-fidelity variant used by F3 once the drone
-// dispatch API returns a drone_id and eta_seconds.
-func (h *Hub) BroadcastHandoffInitiatedFull(tripID, droneID string, etaSeconds int, reason string, predictedETASeconds int) {
+// BroadcastHandoffInitiatedFull is the full-fidelity variant used once the drone
+// dispatch API returns a drone_id, eta_seconds, and full drone metadata.
+func (h *Hub) BroadcastHandoffInitiatedFull(tripID, droneID string, etaSeconds int, reason string, predictedETASeconds int, meta *DroneMetadata) {
 	h.broadcast(Envelope{
 		Type:      MsgHandoffInitiated,
 		Timestamp: time.Now().UTC(),
@@ -228,6 +258,22 @@ func (h *Hub) BroadcastHandoffInitiatedFull(tripID, droneID string, etaSeconds i
 			ETASeconds:          etaSeconds,
 			Reason:              reason,
 			PredictedETASeconds: predictedETASeconds,
+			DroneMetadata:       meta,
+		},
+	})
+}
+
+// BroadcastBountyBoostRequested fans a BOUNTY_BOOST_REQUESTED envelope to
+// every connected client when the AI brain recommends raising the bounty
+// without yet triggering a full drone handoff.
+func (h *Hub) BroadcastBountyBoostRequested(tripID string, breachProb float64, reason string) {
+	h.broadcast(Envelope{
+		Type:      MsgBountyBoost,
+		Timestamp: time.Now().UTC(),
+		Payload: BountyBoostRequestedPayload{
+			TripID:            tripID,
+			BreachProbability: breachProb,
+			Reason:            reason,
 		},
 	})
 }
@@ -273,19 +319,40 @@ func (h *Hub) BroadcastRerouteStatus(driverRef, tripID, status, bountyID string,
 }
 
 // RiskPredictionPayload carries the AI brain's per-trip risk assessment to the dashboard.
+// Shape mirrors datasets/realtime/ai-predict.sample.response.json.
 type RiskPredictionPayload struct {
-	TripID                   string   `json:"trip_id"`
-	PredictedETASeconds      int      `json:"predicted_eta_seconds"`
-	DeadlineSecondsRemaining int      `json:"deadline_seconds_remaining"`
-	BreachProbability        float64  `json:"breach_probability"`
-	WillBreach               bool     `json:"will_breach"`
-	WeatherCondition         string   `json:"weather_condition"`
-	WeatherFactor            float64  `json:"weather_factor"`
-	Reasoning                string   `json:"reasoning"`
-	AIConfidence             float64  `json:"ai_confidence"`
-	AIReasoning              string   `json:"ai_reasoning"`
-	RiskFactors              []string `json:"risk_factors"`
-	Recommendations          []string `json:"recommendations"`
+	TripID                   string  `json:"trip_id"`
+	PredictedETASeconds      int     `json:"predicted_eta_seconds"`
+	DeadlineSecondsRemaining int     `json:"deadline_seconds_remaining"`
+	BreachProbability        float64 `json:"breach_probability"`
+	WillBreach               bool    `json:"will_breach"`
+	Recommendation           string  `json:"recommendation"`
+	WeatherCondition         string  `json:"weather_condition"`
+	WeatherFactor            float64 `json:"weather_factor"`
+	FleetDensityInCorridor   int     `json:"fleet_density_in_corridor"`
+	FleetPenalty             float64 `json:"fleet_penalty"`
+	EffectiveSpeedKPH        float64 `json:"effective_speed_kph"`
+	AIConfidence             float64 `json:"ai_confidence"`
+	Reasoning                string  `json:"reasoning"`
+}
+
+// TripCompletedPayload carries the summary emitted when a trip reaches Completed status.
+type TripCompletedPayload struct {
+	TripID       string  `json:"trip_id"`
+	FinalStatus  string  `json:"final_status"`
+	DroneUsed    bool    `json:"drone_used"`
+	DeadlineMet  bool    `json:"deadline_met"`
+	TotalSeconds int     `json:"total_seconds"`
+	DistanceKm   float64 `json:"distance_km"`
+}
+
+// BroadcastTripCompleted fans a TRIP_COMPLETED envelope to every connected client.
+func (h *Hub) BroadcastTripCompleted(p TripCompletedPayload) {
+	h.broadcast(Envelope{
+		Type:      MsgTripCompleted,
+		Timestamp: time.Now().UTC(),
+		Payload:   p,
+	})
 }
 
 // BroadcastRiskPrediction fans a RISK_PREDICTION envelope to every connected client.

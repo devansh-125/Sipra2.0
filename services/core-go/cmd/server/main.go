@@ -79,6 +79,7 @@ func main() {
 	pingRepo := pgstore.NewPingRepo(pool)
 	pingCache := redisstore.NewPingCache(rdb)
 	fleetTickPublisher := redisstore.NewFleetTickPublisher(rdb, cfg.SimTickMaxLen)
+	fleetGeoStore := redisstore.NewFleetGeoStore(rdb)
 	valhallaClient := sim.NewValhallaClient(cfg.ValhallaURL, 2500*time.Millisecond)
 	corridorEngine := corridor.NewEngine(pool, cfg.CorridorPingWindow, cfg.CorridorBufferM)
 
@@ -119,6 +120,7 @@ func main() {
 
 	riskClient := risk.NewClient(
 		cfg.AiBrainURL,
+		cfg.AiBrainAPIKey,
 		time.Duration(cfg.AiBrainTimeoutMS)*time.Millisecond,
 	)
 	droneClient := risk.NewDroneClient(
@@ -131,6 +133,7 @@ func main() {
 		riskClient,
 		hub,
 		droneClient,
+		fleetGeoStore,
 		time.Duration(cfg.RiskPollIntervalS)*time.Second,
 	)
 	riskMonitor.Start(ctx)
@@ -179,7 +182,7 @@ func main() {
 	})
 	app.Get("/ws/dashboard", fiberws.New(hub.Handler()))
 
-	tripHandler := rest.NewTripHandler(tripRepo)
+	tripHandler := rest.NewTripHandler(tripRepo, hub)
 	pingHandler := rest.NewPingHandler(pingCache, hub)
 	bountyRepo := bounty.NewRepo(pool)
 	bountyHandler := rest.NewBountyHandler(tripRepo, bountyRepo, hub)
@@ -193,12 +196,13 @@ func main() {
 		cfg.SimTickHz,
 		cfg.ChaosEnabled,
 	)
-	simHandler := rest.NewSimHandler(hub)
+	simHandler := rest.NewSimHandler(hub, fleetGeoStore)
 
 	v1 := app.Group("/api/v1")
 	v1.Post("/trips", tripHandler.CreateTrip)
 	v1.Get("/trips/:id", tripHandler.GetTrip)
 	v1.Post("/trips/:id/start", tripHandler.StartTrip)
+	v1.Post("/trips/:id/complete", tripHandler.CompleteTrip)
 	v1.Post("/trips/:id/pings", pingHandler.IngestPing)
 	v1.Post("/trips/:id/bounties", bountyHandler.CreateBounty)
 	v1.Post("/bounties/:id/claim", bountyHandler.ClaimBounty)

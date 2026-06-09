@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { toast } from 'sonner';
 import { useSipraWebSocket } from '../../hooks/useSipraWebSocket';
+import { useMission } from '../../lib/MissionContext';
 import type { HandoffInitiatedPayload } from '../../lib/types';
 
 const WS_URL = process.env.NEXT_PUBLIC_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/dashboard';
@@ -69,6 +70,13 @@ function DroneSVG({ className }: { className?: string }) {
   );
 }
 
+function formatETA(seconds: number): string {
+  if (seconds <= 0) return '0s';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 function ReadoutRow({
   label,
   value,
@@ -99,20 +107,38 @@ function ReadoutRow({
 }
 
 export default function HandoffOverlay() {
-  const { handoffState, clearHandoff } = useSipraWebSocket(WS_URL);
+  const { trip } = useMission();
+  const { handoffState } = useSipraWebSocket(WS_URL, trip?.id ?? null);
+  // useSipraWebSocket now filters by trip.id, so any handoffState we receive
+  // already belongs to the active trip.
+  const handoffForCurrentTrip = handoffState;
+
   const [open, setOpen] = useState(false);
   const [displayed, setDisplayed] = useState<HandoffInitiatedPayload | null>(null);
   const [etaLeft, setEtaLeft] = useState(0);
   const toastFiredRef = useRef(false);
 
-  // Open and update displayed data when a handoff arrives.
+  const handleClose = useCallback(() => {
+    setOpen(false);
+  }, []);
+
+  // Reset overlay state when the trip changes so the prior scenario's
+  // banner doesn't survive a router.push to a fresh trip.
   useEffect(() => {
-    if (!handoffState) return;
-    setDisplayed(handoffState);
-    setOpen(true);
-    setEtaLeft(handoffState.eta_seconds ?? handoffState.predicted_eta_seconds);
+    setOpen(false);
+    setDisplayed(null);
+    setEtaLeft(0);
     toastFiredRef.current = false;
-  }, [handoffState]);
+  }, [trip?.id]);
+
+  // Open and update displayed data when a handoff arrives for THIS trip.
+  useEffect(() => {
+    if (!handoffForCurrentTrip) return;
+    setDisplayed(handoffForCurrentTrip);
+    setOpen(true);
+    setEtaLeft(handoffForCurrentTrip.eta_seconds ?? handoffForCurrentTrip.predicted_eta_seconds);
+    toastFiredRef.current = false;
+  }, [handoffForCurrentTrip]);
 
   // Fire sonner toast exactly once per handoff activation.
   useEffect(() => {
@@ -135,13 +161,7 @@ export default function HandoffOverlay() {
     if (!open) return;
     const id = setTimeout(() => handleClose(), 30_000);
     return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, displayed]);
-
-  const handleClose = useCallback(() => {
-    setOpen(false);
-    clearHandoff();
-  }, [clearHandoff]);
+  }, [open, displayed, handleClose]);
 
   // Nothing to show until the first handoff has been received.
   if (!displayed) return null;
@@ -211,10 +231,10 @@ export default function HandoffOverlay() {
                 <div className="hidden sm:block w-px bg-border self-stretch" />
 
                 {/* Right — readout */}
-                <div className="flex-1 flex flex-col justify-center gap-6 py-10 px-8">
+                <div className="flex-1 flex flex-col justify-center gap-5 py-10 px-8">
                   <ReadoutRow
                     label="ETA"
-                    value={`${etaLeft}s`}
+                    value={formatETA(etaLeft)}
                     large
                   />
                   <ReadoutRow
@@ -222,13 +242,19 @@ export default function HandoffOverlay() {
                     value={displayed.drone_id ?? 'dispatching\u2026'}
                     highlight
                   />
+                  {displayed.drone_metadata && (
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                      <ReadoutRow label="Model"      value={displayed.drone_metadata.model} />
+                      <ReadoutRow label="Battery"    value={`${displayed.drone_metadata.battery_pct}%`} />
+                      <ReadoutRow label="Launch Pad" value={displayed.drone_metadata.launch_pad_id} />
+                      <ReadoutRow label="Route"      value={`${displayed.drone_metadata.route_km.toFixed(1)} km`} />
+                      <ReadoutRow label="Cruise"     value={`${displayed.drone_metadata.cruise_kph} kph`} />
+                      <ReadoutRow label="Altitude"   value={`${displayed.drone_metadata.altitude_m_cruise} m`} />
+                    </div>
+                  )}
                   <ReadoutRow
                     label="Reason"
                     value={displayed.reason}
-                  />
-                  <ReadoutRow
-                    label="Predicted ETA"
-                    value={`${displayed.predicted_eta_seconds}s`}
                   />
                 </div>
               </div>
