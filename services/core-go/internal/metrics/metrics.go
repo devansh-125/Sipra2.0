@@ -48,4 +48,19 @@ var (
 		},
 		[]string{"kind"},
 	)
+
+	WebhookEventsPublished = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "sipra_webhook_events_published_total",
+			Help: "Per-partner corridor delivery jobs produced to the Kafka webhook topic.",
+		},
+	)
+
+	WebhookDeliveries = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sipra_webhook_deliveries_total",
+			Help: "Webhook delivery attempts by outcome (success, client_error, server_error, network_error).",
+		},
+		[]string{"result"},
+	)
 )

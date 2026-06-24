@@ -45,9 +45,9 @@ func TestDispatch_RetriesOnServerErrorAndVerifiesHMAC(t *testing.T) {
 	defer func() { retryDelays = orig }()
 
 	d.dispatch(job{
-		partner: partner{Name: "mock-partner", URL: srv.URL, Secret: secret},
-		body:    body,
-		tripID:  "trip-abc",
+		Partner: partner{Name: "mock-partner", URL: srv.URL, Secret: secret},
+		Body:    body,
+		TripID:  "trip-abc",
 	})
 
 	if got := calls.Load(); got != int32(maxAttempts) {

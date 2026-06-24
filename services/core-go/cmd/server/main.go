@@ -86,10 +86,12 @@ func main() {
 	hub := ws.NewHub()
 
 	dispatcher := webhooks.NewDispatcher(pool, webhooks.Config{
-		QueueSize:   cfg.WebhookQueueSize,
-		HTTPTimeout: time.Duration(cfg.WebhookTimeoutMS) * time.Millisecond,
+		HTTPTimeout:  time.Duration(cfg.WebhookTimeoutMS) * time.Millisecond,
+		KafkaBrokers: cfg.KafkaBrokers,
+		KafkaTopic:   cfg.KafkaWebhookTopic,
+		KafkaGroupID: cfg.KafkaConsumerGroup,
 	})
-	dispatcher.Start(cfg.WebhookWorkers)
+	dispatcher.StartConsumers(ctx, cfg.WebhookWorkers)
 	defer dispatcher.Stop()
 
 	corridorEngine.SetOnUpdated(func(

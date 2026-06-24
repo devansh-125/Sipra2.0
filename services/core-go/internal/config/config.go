@@ -22,10 +22,17 @@ type Config struct {
 	CorridorPingWindow int `env:"CORRIDOR_PING_WINDOW"    envDefault:"20"`
 	CorridorBufferM    int `env:"CORRIDOR_BUFFER_M"       envDefault:"2000"`
 
-	// WebhookWorkers should be sized to active_partners × corridor_updates/sec.
+	// WebhookWorkers is the number of Kafka consumer goroutines draining the
+	// delivery topic; size it to active_partners × corridor_updates/sec.
 	WebhookWorkers   int `env:"WEBHOOK_WORKERS"    envDefault:"8"`
-	WebhookQueueSize int `env:"WEBHOOK_QUEUE_SIZE" envDefault:"1024"`
 	WebhookTimeoutMS int `env:"WEBHOOK_TIMEOUT_MS" envDefault:"5000"`
+
+	// KafkaBrokers is the bootstrap broker list backing the webhook delivery
+	// queue. Durability boundary: a crash between produce and consumer commit
+	// redelivers the message instead of losing it (unlike an in-process channel).
+	KafkaBrokers       []string `env:"KAFKA_BROKERS"        envSeparator:"," envDefault:"localhost:9092"`
+	KafkaWebhookTopic  string   `env:"KAFKA_WEBHOOK_TOPIC"  envDefault:"sipra.webhook.deliveries"`
+	KafkaConsumerGroup string   `env:"KAFKA_CONSUMER_GROUP" envDefault:"sipra-webhook-dispatcher"`
 
 	AiBrainURL        string `env:"AI_BRAIN_URL"           envDefault:"http://localhost:8000"`
 	AiBrainAPIKey     string `env:"AI_BRAIN_API_KEY"       envDefault:""`

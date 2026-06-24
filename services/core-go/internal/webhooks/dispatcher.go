@@ -1,4 +1,10 @@
 // Package webhooks implements the B2B outbound corridor-event dispatcher.
+//
+// BroadcastCorridor produces one Kafka message per active partner; a pool of
+// consumer goroutines started by StartConsumers drains that topic and performs
+// the signed HTTP POST with retry. Kafka — not Go process memory — is the
+// durability boundary: a crash between produce and consumer commit redelivers
+// the message on restart instead of silently dropping it.
 package webhooks
 
 import (
@@ -13,7 +19,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/devansh-125/sipra/services/core-go/internal/metrics"
 	"github.com/jackc/pgx/v5/pgxpool"
+	kafka "github.com/segmentio/kafka-go"
 	"github.com/rs/zerolog/log"
 )
 
@@ -37,46 +45,63 @@ type partner struct {
 	TimeoutMS int
 }
 
-// job is pre-serialized once per broadcast so all workers send identical bytes,
-// which is required for HMAC signatures to be consistent across partners.
+// job is pre-serialized once per broadcast so all partners receive identical
+// bytes, which is required for HMAC signatures to be consistent. It is also
+// the wire format written to and read back from Kafka, so every field must be
+// exported for encoding/json to round-trip it.
 type job struct {
-	partner partner
-	body    []byte
-	tripID  string
+	Partner partner
+	Body    []byte
+	TripID  string
 }
 
-// Dispatcher fans out corridor updates to every active partner via a fixed
-// worker pool. BroadcastCorridor is safe to call from concurrent goroutines.
+// Dispatcher fans out corridor updates to every active partner via Kafka:
+// BroadcastCorridor produces one message per partner, keyed by partner ID so
+// a single partner's deliveries stay ordered on one topic partition, and the
+// consumer goroutines started by StartConsumers perform the actual signed
+// HTTP POST.
 type Dispatcher struct {
-	pool   *pgxpool.Pool
-	client *http.Client
-	jobs   chan job
-	wg     sync.WaitGroup
+	pool     *pgxpool.Pool
+	client   *http.Client
+	producer *kafka.Writer
 
-	startOnce sync.Once
-	stopOnce  sync.Once
-	stopped   chan struct{}
+	brokers []string
+	topic   string
+	groupID string
+
+	wg       sync.WaitGroup
+	stopOnce sync.Once
+	stopped  chan struct{}
 }
 
 // Config holds the tunable parameters for NewDispatcher.
 type Config struct {
-	// QueueSize caps the internal jobs channel; overflow jobs are dropped, not
-	// blocked, to keep the corridor hook off the critical path.
-	QueueSize int
-
 	// HTTPTimeout is the default per-POST ceiling. A per-partner timeout_ms
 	// column overrides this value when set.
 	HTTPTimeout time.Duration
+
+	// KafkaBrokers is the bootstrap broker list (host:port, ...) backing the
+	// delivery queue.
+	KafkaBrokers []string
+	// KafkaTopic holds per-partner delivery jobs.
+	KafkaTopic string
+	// KafkaGroupID is the consumer group shared by every StartConsumers
+	// goroutine — and, when core-go is scaled to multiple replicas, every
+	// replica — so each job is delivered to exactly one consumer.
+	KafkaGroupID string
 }
 
-// NewDispatcher creates a Dispatcher backed by pool. Call Start before the
-// first BroadcastCorridor.
+// NewDispatcher creates a Dispatcher backed by pool and a Kafka writer. Call
+// StartConsumers before the first BroadcastCorridor is expected to be drained.
 func NewDispatcher(pool *pgxpool.Pool, cfg Config) *Dispatcher {
-	if cfg.QueueSize <= 0 {
-		cfg.QueueSize = 1024
-	}
 	if cfg.HTTPTimeout <= 0 {
 		cfg.HTTPTimeout = 5 * time.Second
+	}
+	if cfg.KafkaTopic == "" {
+		cfg.KafkaTopic = "sipra.webhook.deliveries"
+	}
+	if cfg.KafkaGroupID == "" {
+		cfg.KafkaGroupID = "sipra-webhook-dispatcher"
 	}
 
 	transport := &http.Transport{
@@ -85,46 +110,74 @@ func NewDispatcher(pool *pgxpool.Pool, cfg Config) *Dispatcher {
 		IdleConnTimeout:     90 * time.Second,
 	}
 
+	producer := &kafka.Writer{
+		Addr:         kafka.TCP(cfg.KafkaBrokers...),
+		Topic:        cfg.KafkaTopic,
+		Balancer:     &kafka.Hash{}, // same partner ID -> same partition -> ordered per partner
+		BatchTimeout: 100 * time.Millisecond,
+		RequiredAcks: kafka.RequireOne,
+		// kafka-go gates auto-creation on this flag regardless of the
+		// broker's auto.create.topics.enable — without it every first
+		// produce to a not-yet-created topic fails UNKNOWN_TOPIC_OR_PARTITION.
+		AllowAutoTopicCreation: true,
+	}
+
 	return &Dispatcher{
 		pool: pool,
 		client: &http.Client{
 			Transport: transport,
 			Timeout:   cfg.HTTPTimeout,
 		},
-		jobs:    make(chan job, cfg.QueueSize),
-		stopped: make(chan struct{}),
+		producer: producer,
+		brokers:  cfg.KafkaBrokers,
+		topic:    cfg.KafkaTopic,
+		groupID:  cfg.KafkaGroupID,
+		stopped:  make(chan struct{}),
 	}
 }
 
-// Start spawns workers goroutines that drain the jobs channel. Idempotent.
-func (d *Dispatcher) Start(workers int) {
-	d.startOnce.Do(func() {
-		if workers <= 0 {
-			workers = 4
-		}
-		for i := 0; i < workers; i++ {
-			d.wg.Add(1)
-			go d.worker(i)
-		}
-		log.Info().Int("workers", workers).Msg("webhook dispatcher: started")
-	})
+// StartConsumers spawns n goroutines, each owning its own Kafka reader in the
+// shared consumer group, that drain partner delivery jobs and dispatch them.
+// Call once at startup.
+func (d *Dispatcher) StartConsumers(ctx context.Context, n int) {
+	if n <= 0 {
+		n = 4
+	}
+	for i := 0; i < n; i++ {
+		reader := kafka.NewReader(kafka.ReaderConfig{
+			Brokers:  d.brokers,
+			Topic:    d.topic,
+			GroupID:  d.groupID,
+			MinBytes: 1,
+			MaxBytes: 10e6,
+		})
+		d.wg.Add(1)
+		go d.consume(ctx, i, reader)
+	}
+	log.Info().Int("consumers", n).Str("topic", d.topic).Str("group", d.groupID).
+		Msg("webhook dispatcher: kafka consumers started")
 }
 
-// Stop closes the jobs channel and waits for all in-flight deliveries to finish.
+// Stop closes the producer and signals every consumer to exit, then waits for
+// in-flight dispatches to finish.
 func (d *Dispatcher) Stop() {
 	d.stopOnce.Do(func() {
 		close(d.stopped)
-		close(d.jobs)
+		if err := d.producer.Close(); err != nil {
+			log.Error().Err(err).Msg("webhook dispatcher: producer close")
+		}
 		d.wg.Wait()
 		log.Info().Msg("webhook dispatcher: stopped")
 	})
 }
 
 // BroadcastCorridor queries active partners, serializes the payload once, and
-// enqueues one HTTP POST job per partner. Returns the number of jobs enqueued.
-// A zero return with nil error means no active subscribers — not an error.
+// produces one Kafka message per partner. Returns the number of messages
+// produced. A zero return with nil error means no active subscribers — not an
+// error.
 //
-// ctx governs only the DB query; each partner POST runs under its own timeout.
+// ctx governs the DB query and the Kafka produce call; each partner's HTTP
+// POST runs later, under its own timeout, inside a consumer goroutine.
 func (d *Dispatcher) BroadcastCorridor(
 	ctx context.Context,
 	tripID, corridorID string,
@@ -158,19 +211,20 @@ func (d *Dispatcher) BroadcastCorridor(
 		return 0, fmt.Errorf("marshal payload: %w", err)
 	}
 
-	enqueued := 0
+	msgs := make([]kafka.Message, 0, len(partners))
 	for _, p := range partners {
-		select {
-		case d.jobs <- job{partner: p, body: body, tripID: tripID}:
-			enqueued++
-		default:
-			log.Warn().
-				Str("partner", p.Name).
-				Str("trip", tripID).
-				Msg("webhook dispatcher: queue full, dropping job")
+		jBytes, err := json.Marshal(job{Partner: p, Body: body, TripID: tripID})
+		if err != nil {
+			return 0, fmt.Errorf("marshal job for partner %s: %w", p.Name, err)
 		}
+		msgs = append(msgs, kafka.Message{Key: []byte(p.ID), Value: jBytes})
 	}
-	return enqueued, nil
+
+	if err := d.producer.WriteMessages(ctx, msgs...); err != nil {
+		return 0, fmt.Errorf("kafka: produce: %w", err)
+	}
+	metrics.WebhookEventsPublished.Add(float64(len(msgs)))
+	return len(msgs), nil
 }
 
 const sqlListActivePartners = `
@@ -196,12 +250,42 @@ func (d *Dispatcher) listActivePartners(ctx context.Context) ([]partner, error) 
 	return out, rows.Err()
 }
 
-func (d *Dispatcher) worker(id int) {
+// consume drains reader until ctx is cancelled, dispatching each job and only
+// committing its offset once dispatch returns — success or exhausted
+// retries. That ordering is what makes this at-least-once: a crash between
+// dispatch and commit redelivers the job after restart instead of losing it.
+func (d *Dispatcher) consume(ctx context.Context, id int, reader *kafka.Reader) {
 	defer d.wg.Done()
-	for j := range d.jobs {
+	defer func() {
+		if err := reader.Close(); err != nil {
+			log.Error().Err(err).Int("consumer", id).Msg("webhook dispatcher: reader close")
+		}
+	}()
+
+	for {
+		msg, err := reader.FetchMessage(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Error().Err(err).Int("consumer", id).Msg("webhook dispatcher: fetch message")
+			continue
+		}
+
+		var j job
+		if err := json.Unmarshal(msg.Value, &j); err != nil {
+			log.Error().Err(err).Int("consumer", id).Msg("webhook dispatcher: malformed job, dropping")
+			_ = reader.CommitMessages(ctx, msg)
+			continue
+		}
+
 		d.dispatch(j)
+
+		if err := reader.CommitMessages(ctx, msg); err != nil {
+			log.Error().Err(err).Int("consumer", id).Str("trip", j.TripID).
+				Msg("webhook dispatcher: commit offset")
+		}
 	}
-	log.Debug().Int("worker", id).Msg("webhook dispatcher: worker exit")
 }
 
 // retryDelays is a package-level var so tests can override it without forking
@@ -238,26 +322,26 @@ func (d *Dispatcher) dispatch(j job) {
 // considered final (2xx/3xx/4xx). Returns false on network errors or 5xx,
 // signalling the caller to retry.
 func (d *Dispatcher) doPost(j job, attempt int) bool {
-	timeout := time.Duration(j.partner.TimeoutMS) * time.Millisecond
+	timeout := time.Duration(j.Partner.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = d.client.Timeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, j.partner.URL, bytes.NewReader(j.body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, j.Partner.URL, bytes.NewReader(j.Body))
 	if err != nil {
 		log.Error().Err(err).
-			Str("partner", j.partner.Name).
+			Str("partner", j.Partner.Name).
 			Int("attempt", attempt).
 			Msg("webhook: build request")
 		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "sipra-core/1.0")
-	req.Header.Set("X-Sipra-Partner", j.partner.Name)
-	req.Header.Set("X-Sipra-Trip", j.tripID)
-	req.Header.Set("X-Sipra-Signature", sign(j.partner.Secret, j.body))
+	req.Header.Set("X-Sipra-Partner", j.Partner.Name)
+	req.Header.Set("X-Sipra-Trip", j.TripID)
+	req.Header.Set("X-Sipra-Signature", sign(j.Partner.Secret, j.Body))
 
 	started := time.Now()
 	resp, err := d.client.Do(req)
@@ -265,11 +349,12 @@ func (d *Dispatcher) doPost(j job, attempt int) bool {
 
 	if err != nil {
 		log.Error().Err(err).
-			Str("partner", j.partner.Name).
-			Str("trip", j.tripID).
+			Str("partner", j.Partner.Name).
+			Str("trip", j.TripID).
 			Int("attempt", attempt).
 			Dur("latency", latency).
 			Msg("webhook: partner POST failed")
+		metrics.WebhookDeliveries.WithLabelValues("network_error").Inc()
 		return false
 	}
 	defer resp.Body.Close()
@@ -278,12 +363,21 @@ func (d *Dispatcher) doPost(j job, attempt int) bool {
 	if resp.StatusCode >= 400 {
 		evt = log.Warn()
 	}
-	evt.Str("partner", j.partner.Name).
-		Str("trip", j.tripID).
+	evt.Str("partner", j.Partner.Name).
+		Str("trip", j.TripID).
 		Int("status", resp.StatusCode).
 		Int("attempt", attempt).
 		Dur("latency", latency).
 		Msg("webhook: delivered")
+
+	switch {
+	case resp.StatusCode < 400:
+		metrics.WebhookDeliveries.WithLabelValues("success").Inc()
+	case resp.StatusCode < 500:
+		metrics.WebhookDeliveries.WithLabelValues("client_error").Inc()
+	default:
+		metrics.WebhookDeliveries.WithLabelValues("server_error").Inc()
+	}
 
 	// 5xx is a transient server error — worth retrying.
 	return resp.StatusCode < 500
