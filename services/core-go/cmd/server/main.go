@@ -137,6 +137,7 @@ func main() {
 		droneClient,
 		fleetGeoStore,
 		time.Duration(cfg.RiskPollIntervalS)*time.Second,
+		cfg.RiskWorkers,
 	)
 	riskMonitor.Start(ctx)
 

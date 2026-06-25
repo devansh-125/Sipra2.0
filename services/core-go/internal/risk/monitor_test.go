@@ -3,6 +3,9 @@ package risk_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,6 +109,17 @@ func inTransitTrip(id string) domain.Trip {
 	}
 }
 
+// tripWithDeadline is like inTransitTrip but with an explicit deadline, used
+// by tests that assert evaluation order across trips of different urgency.
+func tripWithDeadline(id string, deadline time.Time) domain.Trip {
+	return domain.Trip{
+		ID:                 domain.TripID(id),
+		Status:             domain.TripStatusInTransit,
+		GoldenHourDeadline: deadline,
+		Destination:        domain.Point{Lat: 12.9716, Lng: 77.5946},
+	}
+}
+
 func recentPings(tripID string, n int, speed float64) []domain.GPSPing {
 	out := make([]domain.GPSPing, 0, n)
 	s := speed
@@ -131,7 +145,7 @@ func newMonitor(trips risk.TripStore, pings risk.PingStore, p risk.Predictor, d 
 		d = &fakeDroneDispatcher{resp: &risk.DispatchResponse{DroneID: "test-drone", ETASeconds: 300, Status: "DISPATCHED"}}
 	}
 	density := &fakeFleetDensity{count: 0}
-	return risk.NewMonitor(trips, pings, p, ws.NewHub(), d, density, time.Hour)
+	return risk.NewMonitor(trips, pings, p, ws.NewHub(), d, density, time.Hour, 4)
 }
 
 // --- tests ---
@@ -272,7 +286,7 @@ func TestEvaluateOnce_PassesRecentSpeedsAndDensity(t *testing.T) {
 
 	risk.NewMonitor(trips, pings, pred, ws.NewHub(),
 		&fakeDroneDispatcher{resp: &risk.DispatchResponse{Status: "DISPATCHED"}},
-		density, time.Hour,
+		density, time.Hour, 4,
 	).EvaluateOnce(context.Background())
 
 	if len(capturedReq.RecentSpeedsKPH) != 5 {
@@ -346,4 +360,140 @@ func (c *capturePredictor) PredictDrone(_ context.Context, req risk.DronePredict
 		WeatherFactor:    1.0,
 		PayloadFactor:    1.0,
 	}, nil
+}
+
+func TestEvaluateOnce_EvaluatesMostUrgentTripFirst(t *testing.T) {
+	now := time.Now()
+	// Inserted out of urgency order on purpose — the monitor must sort them.
+	trips := []domain.Trip{
+		tripWithDeadline("trip-far", now.Add(60*time.Minute)),
+		tripWithDeadline("trip-soonest", now.Add(5*time.Minute)),
+		tripWithDeadline("trip-mid", now.Add(20*time.Minute)),
+	}
+	tripStore := &fakeTripStore{trips: trips}
+	pings := &fakePingStore{pings: recentPings("any", 5, 40)}
+	pred := &sequencePredictor{resp: decideResp(risk.DecisionActionContinue, risk.PredictResponse{})}
+
+	mon := risk.NewMonitor(tripStore, pings, pred, ws.NewHub(),
+		&fakeDroneDispatcher{resp: &risk.DispatchResponse{Status: "DISPATCHED"}},
+		&fakeFleetDensity{count: 0}, time.Hour, 1) // workers:1 forces strict sequential order
+
+	mon.EvaluateOnce(context.Background())
+
+	want := []string{"trip-soonest", "trip-mid", "trip-far"}
+	if !slices.Equal(pred.seen, want) {
+		t.Fatalf("evaluation order = %v, want %v", pred.seen, want)
+	}
+}
+
+func TestEvaluateOnce_AllTripsEvaluatedUnderConcurrency(t *testing.T) {
+	const numTrips = 20
+	trips := make([]domain.Trip, numTrips)
+	for i := range trips {
+		trips[i] = inTransitTrip(fmt.Sprintf("trip-c-%d", i))
+	}
+	tripStore := &fakeTripStore{trips: trips}
+	pings := &fakePingStore{pings: recentPings("any", 5, 40)}
+	pred := &sequencePredictor{resp: decideResp(risk.DecisionActionContinue, risk.PredictResponse{})}
+
+	mon := risk.NewMonitor(tripStore, pings, pred, ws.NewHub(),
+		&fakeDroneDispatcher{resp: &risk.DispatchResponse{Status: "DISPATCHED"}},
+		&fakeFleetDensity{count: 0}, time.Hour, 8)
+
+	mon.EvaluateOnce(context.Background())
+
+	if len(pred.seen) != numTrips {
+		t.Fatalf("expected all %d trips evaluated, got %d", numTrips, len(pred.seen))
+	}
+}
+
+func TestEvaluateOnce_NeverExceedsWorkerLimit(t *testing.T) {
+	const workers = 3
+	const numTrips = 10
+
+	trips := make([]domain.Trip, numTrips)
+	for i := range trips {
+		trips[i] = inTransitTrip(fmt.Sprintf("trip-bound-%d", i))
+	}
+	tripStore := &fakeTripStore{trips: trips}
+	pings := &fakePingStore{pings: recentPings("any", 5, 40)}
+	pred := &blockingPredictor{
+		release: make(chan struct{}),
+		resp:    decideResp(risk.DecisionActionContinue, risk.PredictResponse{}),
+	}
+
+	mon := risk.NewMonitor(tripStore, pings, pred, ws.NewHub(),
+		&fakeDroneDispatcher{resp: &risk.DispatchResponse{Status: "DISPATCHED"}},
+		&fakeFleetDensity{count: 0}, time.Hour, workers)
+
+	done := make(chan struct{})
+	go func() {
+		mon.EvaluateOnce(context.Background())
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond) // let the pool saturate to its bound
+	close(pred.release)
+	<-done
+
+	pred.mu.Lock()
+	got := pred.maxInFlight
+	pred.mu.Unlock()
+
+	if got != workers {
+		t.Errorf("max in-flight = %d, want exactly %d", got, workers)
+	}
+}
+
+// sequencePredictor records every DecideRequest's TripID in call order. At
+// workers:1 that order is deterministic and proves the priority sort; at
+// higher worker counts it's used only to count completed evaluations.
+type sequencePredictor struct {
+	mu   sync.Mutex
+	seen []string
+	resp *risk.DecideResponse
+}
+
+func (s *sequencePredictor) Decide(_ context.Context, req risk.DecideRequest) (*risk.DecideResponse, error) {
+	s.mu.Lock()
+	s.seen = append(s.seen, req.TripID)
+	s.mu.Unlock()
+	return s.resp, nil
+}
+
+func (s *sequencePredictor) PredictDrone(_ context.Context, req risk.DronePredictRequest) (*risk.DronePredictResponse, error) {
+	return &risk.DronePredictResponse{TripID: req.TripID, WeatherCondition: "clear"}, nil
+}
+
+// blockingPredictor blocks every Decide call until release is closed, while
+// tracking the maximum number of simultaneously in-flight calls — used to
+// prove the worker pool never exceeds its configured concurrency bound.
+type blockingPredictor struct {
+	release chan struct{}
+	resp    *risk.DecideResponse
+
+	mu          sync.Mutex
+	inFlight    int
+	maxInFlight int
+}
+
+func (b *blockingPredictor) Decide(_ context.Context, _ risk.DecideRequest) (*risk.DecideResponse, error) {
+	b.mu.Lock()
+	b.inFlight++
+	if b.inFlight > b.maxInFlight {
+		b.maxInFlight = b.inFlight
+	}
+	b.mu.Unlock()
+
+	<-b.release
+
+	b.mu.Lock()
+	b.inFlight--
+	b.mu.Unlock()
+
+	return b.resp, nil
+}
+
+func (b *blockingPredictor) PredictDrone(_ context.Context, req risk.DronePredictRequest) (*risk.DronePredictResponse, error) {
+	return &risk.DronePredictResponse{TripID: req.TripID, WeatherCondition: "clear"}, nil
 }

@@ -1,7 +1,10 @@
 package risk
 
 import (
+	"cmp"
 	"context"
+	"slices"
+	"sync"
 	"time"
 
 	"github.com/devansh-125/sipra/services/core-go/internal/api/ws"
@@ -54,13 +57,19 @@ type Monitor struct {
 	density    FleetDensity
 	hub        *ws.Hub
 	interval   time.Duration
+	workers    int
 }
 
 // NewMonitor wires the Monitor with its dependencies.
 // Both *pgstore.TripRepo and *pgstore.PingRepo satisfy the store interfaces.
 // density may be nil if no fleet GEO source is wired yet — in that case the
 // monitor sends fleet_density_in_corridor=0 so the AI brain still works.
-func NewMonitor(trips TripStore, pings PingStore, p Predictor, hub *ws.Hub, dispatcher DroneDispatcher, density FleetDensity, interval time.Duration) *Monitor {
+// workers bounds how many trips EvaluateOnce evaluates concurrently per poll
+// cycle; values <= 0 fall back to 4.
+func NewMonitor(trips TripStore, pings PingStore, p Predictor, hub *ws.Hub, dispatcher DroneDispatcher, density FleetDensity, interval time.Duration, workers int) *Monitor {
+	if workers <= 0 {
+		workers = 4
+	}
 	return &Monitor{
 		trips:      trips,
 		pings:      pings,
@@ -69,6 +78,7 @@ func NewMonitor(trips TripStore, pings PingStore, p Predictor, hub *ws.Hub, disp
 		density:    density,
 		hub:        hub,
 		interval:   interval,
+		workers:    workers,
 	}
 }
 
@@ -96,17 +106,53 @@ func (m *Monitor) run(ctx context.Context) {
 }
 
 // EvaluateOnce runs one full poll cycle: fetch InTransit trips, call AI brain,
-// transition breaching trips. Exported so tests can invoke it synchronously.
+// transition breaching trips. Trips are evaluated most-urgent-first across a
+// bounded worker pool, so a fleet larger than m.workers never lets a
+// near-breach trip wait behind a pile of lower-urgency ones. Exported so
+// tests can invoke it synchronously.
 func (m *Monitor) EvaluateOnce(ctx context.Context) {
 	trips, err := m.trips.ListInTransit(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("risk: list in-transit trips")
 		return
 	}
-
-	for _, trip := range trips {
-		m.evaluateTrip(ctx, trip)
+	if len(trips) == 0 {
+		return
 	}
+
+	now := time.Now().UTC()
+	slices.SortFunc(trips, func(a, b domain.Trip) int {
+		return cmp.Compare(a.RemainingGoldenHour(now), b.RemainingGoldenHour(now))
+	})
+
+	m.evaluateAll(ctx, trips)
+}
+
+// evaluateAll fans trips out across m.workers goroutines. trips must already
+// be sorted most-urgent-first: the queue channel is filled in that order
+// before any worker starts, so whichever worker is next free always picks up
+// the most-urgent unstarted trip. A trip already mid-flight is never
+// preempted by a newer, more urgent one — it's a single bounded AI-brain
+// call, not worth interrupting.
+func (m *Monitor) evaluateAll(ctx context.Context, trips []domain.Trip) {
+	queue := make(chan domain.Trip, len(trips))
+	for _, t := range trips {
+		queue <- t
+	}
+	close(queue)
+
+	n := min(m.workers, len(trips))
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			for trip := range queue {
+				m.evaluateTrip(ctx, trip)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func (m *Monitor) evaluateTrip(ctx context.Context, trip domain.Trip) {

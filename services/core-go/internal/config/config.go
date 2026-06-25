@@ -37,11 +37,16 @@ type Config struct {
 	AiBrainURL        string `env:"AI_BRAIN_URL"           envDefault:"http://localhost:8000"`
 	AiBrainAPIKey     string `env:"AI_BRAIN_API_KEY"       envDefault:""`
 	RiskPollIntervalS int    `env:"RISK_POLL_INTERVAL_SEC" envDefault:"10"`
-	AiBrainTimeoutMS  int    `env:"AI_BRAIN_TIMEOUT_MS"    envDefault:"3000"`
-	MockDroneURL      string `env:"MOCK_DRONE_URL"         envDefault:"http://localhost:4003"`
-	ValhallaURL       string `env:"VALHALLA_URL"           envDefault:"http://localhost:8002"`
-	SimTickHz         int    `env:"SIM_TICK_HZ"            envDefault:"20"`
-	SimTickMaxLen     int64  `env:"SIM_TICK_STREAM_MAXLEN" envDefault:"20000"`
+	// RiskWorkers is the number of goroutines concurrently evaluating
+	// InTransit trips per poll cycle. Trips are sorted most-urgent-first
+	// before fan-out, so the most urgent trips never wait behind less-urgent
+	// ones even once the fleet outgrows this worker count.
+	RiskWorkers      int    `env:"RISK_WORKERS"           envDefault:"8"`
+	AiBrainTimeoutMS int    `env:"AI_BRAIN_TIMEOUT_MS"    envDefault:"3000"`
+	MockDroneURL     string `env:"MOCK_DRONE_URL"         envDefault:"http://localhost:4003"`
+	ValhallaURL      string `env:"VALHALLA_URL"           envDefault:"http://localhost:8002"`
+	SimTickHz        int    `env:"SIM_TICK_HZ"            envDefault:"20"`
+	SimTickMaxLen    int64  `env:"SIM_TICK_STREAM_MAXLEN" envDefault:"20000"`
 
 	ChaosEnabled bool `env:"CHAOS_ENABLED" envDefault:"false"`
 }
